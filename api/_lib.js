@@ -168,8 +168,10 @@ function password() {
 // Login methods: the shared organiser password and/or an OIDC provider such
 // as Auth0. Sessions of both kinds are signed with AUTH_SECRET (falling back
 // to ORGA_PASSWORD); rotating it signs everybody out.
+// AUTH0_ISSUER_BASE_URL and AUTH0_SECRET are the names the Auth0 integration
+// from the Vercel Marketplace sets, so installing it needs no renaming.
 export function oidcConfig() {
-  const domain = process.env.AUTH0_DOMAIN
+  const domain = process.env.AUTH0_DOMAIN || process.env.AUTH0_ISSUER_BASE_URL
   const clientId = process.env.AUTH0_CLIENT_ID
   const clientSecret = process.env.AUTH0_CLIENT_SECRET
   if (!domain || !clientId || !clientSecret) {
@@ -191,7 +193,7 @@ export function allowedEmails() {
 }
 
 function secret() {
-  const s = process.env.AUTH_SECRET || process.env.ORGA_PASSWORD
+  const s = process.env.AUTH_SECRET || process.env.AUTH0_SECRET || process.env.ORGA_PASSWORD
   if (!s) {
     throw new HttpError(503, "Weder ORGA_PASSWORD noch AUTH_SECRET ist gesetzt")
   }

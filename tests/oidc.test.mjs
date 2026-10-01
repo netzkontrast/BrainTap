@@ -123,4 +123,22 @@ describe("OIDC login (Auth0-compatible)", () => {
     const { GET: state } = await import("../api/state.js")
     assert.equal((await state(new Request(base + "/api/state"))).status, 401)
   })
+
+  test("the variable names of the Vercel Auth0 integration work too", async () => {
+    const saved = { domain: process.env.AUTH0_DOMAIN, secret: process.env.AUTH_SECRET }
+    delete process.env.AUTH0_DOMAIN
+    delete process.env.AUTH_SECRET
+    process.env.AUTH0_ISSUER_BASE_URL = issuer
+    process.env.AUTH0_SECRET = "s".repeat(40)
+    try {
+      const done = await signIn()
+      assert.equal(done.status, 302)
+      assert.equal(done.headers.get("location"), "/planung.html")
+    } finally {
+      process.env.AUTH0_DOMAIN = saved.domain
+      process.env.AUTH_SECRET = saved.secret
+      delete process.env.AUTH0_ISSUER_BASE_URL
+      delete process.env.AUTH0_SECRET
+    }
+  })
 })

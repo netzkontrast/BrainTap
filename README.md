@@ -18,11 +18,20 @@ Alles läuft auf Vercel. Die Datenbank ist eine SQLite-Datei, die als privater *
 | `BLOB_READ_WRITE_TOKEN` | Wird gesetzt, wenn man im Projekt unter *Storage → Create → Blob* einen Blob Store anlegt und verbindet |
 | `ORGA_PASSWORD` | Gemeinsames Passwort des Orga-Teams |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Optional statt Blob |
-| `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET` | Optional: Login über Auth0 (Regular Web Application, Callback-URL `https://<domain>/api/oidc-callback`) |
+| `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET` | Optional: Login über Auth0 (Regular Web Application, Callback-URL `https://<domain>/api/oidc-callback`). Die Namen der Auth0-Integration aus dem Vercel Marketplace (`AUTH0_ISSUER_BASE_URL`, `AUTH0_SECRET`) werden ebenfalls erkannt |
 | `AUTH_ALLOWED_EMAILS` | Kommagetrennte E-Mail-Adressen, die sich per Auth0 anmelden dürfen (Pflicht für Auth0) |
 | `AUTH_SECRET` | Zufälliger Schlüssel (≥ 32 Zeichen) zum Signieren der Sitzungen; nötig, wenn kein `ORGA_PASSWORD` gesetzt ist |
 
 `/api/health` zeigt ohne Login, ob Speicher und Anmeldung eingerichtet sind. Ist Auth0 eingerichtet, zeigt die Anmeldeseite „Mit Auth0 anmelden“; ohne `ORGA_PASSWORD` entfällt das Passwortfeld.
+
+### Einrichtung auf Vercel
+
+1. *Storage → Create → Blob* (privat, Region `fra1`) und mit dem Projekt verbinden – setzt `BLOB_READ_WRITE_TOKEN`.
+2. `AUTH_SECRET` als *Sensitive* Variable setzen (`openssl rand -hex 32`).
+3. Anmeldung wählen:
+   - Passwort: `ORGA_PASSWORD` setzen, und/oder
+   - Auth0: *Integrations → Browse Marketplace → Auth0* installieren und mit dem Projekt verbinden (oder eine Regular Web Application in Auth0 anlegen und `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET` selbst setzen). In der Auth0-Anwendung als *Allowed Callback URL* `https://braintap-theta.vercel.app/api/oidc-callback` eintragen, dann `AUTH_ALLOWED_EMAILS` setzen.
+4. Neu deployen und `/api/health` prüfen.
 
 ### Lokal starten
 
