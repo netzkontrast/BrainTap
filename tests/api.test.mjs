@@ -103,6 +103,14 @@ describe("sync", () => {
     assert.equal(body.solutions[0].solution, "Rhein")
   })
 
+  test("questions are a stored collection", async () => {
+    const q = { id: "q1", round: "r03", text: "Wie hoch ist der Dom?", mc: true, options: ["157 m", "120 m"], correct: 0, status: "fertig" }
+    const res = await post(sync, "/api/sync", { ops: [{ op: "put", collection: "questions", id: "q1", data: q, ts: 5 }] })
+    assert.equal(res.status, 200)
+    const { body } = await getState()
+    assert.deepEqual(body.items.find((i) => i.collection === "questions").data, q)
+  })
+
   test("invalid ops reject the whole batch", async () => {
     const res = await post(sync, "/api/sync", { ops: [
       { op: "put", collection: "tasks", id: "t3", data: {}, ts: 1 },

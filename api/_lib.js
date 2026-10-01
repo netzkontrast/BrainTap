@@ -15,6 +15,7 @@ export const ITEM_COLLECTIONS = new Set([
   "tech",
   "teams",
   "scores",
+  "questions",
 ])
 
 let client = null

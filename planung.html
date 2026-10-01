@@ -113,6 +113,7 @@ td input[type="text"] { width: 100%; min-width: 8em; }
 .ros td:first-child { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
 .rank1 td { font-weight: 700; }
 footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
+.ok-text { color: var(--ok); font-weight: 600; }
 .sync { margin: 6px 0 0; font-size: .8rem; color: var(--muted); }
 .sync.ok { color: var(--ok); }
 .sync.warn { color: var(--warn); font-weight: 600; }
@@ -121,6 +122,22 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
 .login { width: 100%; max-width: 360px; margin: 0; }
 .login input[type="password"] { width: 100%; margin: 4px 0 8px; }
 .err { color: var(--warn); min-height: 1.2em; margin: 0 0 8px; }
+.qlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.q { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--surface); }
+.q.fertig { border-left: 4px solid var(--ok); }
+.q.entwurf { border-left: 4px solid var(--warn); }
+.q-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.q-head b { font-variant-numeric: tabular-nums; }
+.q textarea { min-height: 2.6em; }
+.q-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+.q-grid label { display: flex; flex-direction: column; gap: 2px; font-size: .8rem; color: var(--muted); }
+.q-grid input[type="text"], .q-grid select { width: 100%; color: var(--text); font-size: .95rem; }
+.q-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px; margin-top: 8px; }
+.q-opt { display: flex; gap: 6px; align-items: center; }
+.q-opt input[type="text"] { flex: 1; }
+.q-opt input[type="radio"] { accent-color: var(--ok); width: 18px; height: 18px; flex: none; }
+.q-flags { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 8px; font-size: .85rem; }
+.q-flags label { display: inline-flex; gap: 6px; align-items: center; }
 /* Beamer view */
 #beamer { position: fixed; inset: 0; background: #0f0e0b; color: #f3eee2; z-index: 50; display: none; flex-direction: column; padding: 4vh 6vw; }
 #beamer.on { display: flex; }
@@ -166,6 +183,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     <button role="tab" data-tab="overview" aria-selected="true">Übersicht</button>
     <button role="tab" data-tab="tasks" aria-selected="false">Zeitplan &amp; To-dos</button>
     <button role="tab" data-tab="rounds" aria-selected="false">Runden-Planer</button>
+    <button role="tab" data-tab="questions" aria-selected="false">Fragen</button>
     <button role="tab" data-tab="tech" aria-selected="false">Technik</button>
     <button role="tab" data-tab="score" aria-selected="false">Teams &amp; Scoreboard</button>
   </nav>
@@ -234,7 +252,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       <p class="muted small">Dauer = Fragen × Sekunden + Puffer für Einsammeln und Auswerten. Die Zeiten fließen in den Ablauf unten ein.</p>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>#</th><th>Runde</th><th>Format</th><th class="num">Fragen</th><th class="num">s/Frage</th><th class="num">Puffer min</th><th class="num">Dauer</th><th>Anti-Schummel</th><th>Fragen fertig</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>Runde</th><th>Format</th><th class="num">Fragen</th><th class="num">s/Frage</th><th class="num">Puffer min</th><th class="num">Dauer</th><th>Anti-Schummel</th><th class="num">Fragen fertig</th><th></th></tr></thead>
           <tbody id="roundTable"></tbody>
           <tfoot><tr><th colspan="6">Gesamt (nur Runden)</th><th class="num" id="roundTotal"></th><th colspan="3"></th></tr></tfoot>
         </table>
@@ -260,6 +278,42 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
         <li>Antwortbögen nach jeder Runde mit dem Nachbarteam tauschen.</li>
         <li>Moderation bewegt sich durch den Raum, dazu 2–3 sehr schwere „Indikatorfragen“.</li>
       </ul>
+    </div>
+  </section>
+
+  <!-- FRAGEN -->
+  <section class="panel" id="panel-questions" role="tabpanel">
+    <div class="card">
+      <h2>Fragen-Bank</h2>
+      <p class="muted small">Fragen pro Runde sammeln und bis „fertig“ bringen. Vor „fertig“ jede Frage in ChatGPT/Gemini testen: Was die KI in wenigen Sekunden löst, ist am Abend zu leicht zu googeln. In Razzia-Runden braucht jede Frage 2–4 Antwortoptionen.</p>
+      <div class="row noprint" style="margin-bottom:10px">
+        <label class="small">Runde <select id="qRound"></select></label>
+        <label class="small">Status <select id="qFilter">
+          <option value="">alle</option><option value="idee">Idee</option><option value="entwurf">Entwurf</option><option value="fertig">fertig</option>
+        </select></label>
+        <button class="btn primary" id="addQuestion">Frage hinzufügen</button>
+      </div>
+      <p class="small" id="qSummary"></p>
+      <ol class="qlist" id="qList"></ol>
+    </div>
+
+    <div class="card">
+      <h2>Export &amp; Druck</h2>
+      <h3>Razzia-Quiz</h3>
+      <p class="muted small">Erzeugt aus den Fragen der gewählten Runde eine Quiz-Datei für Razzia (<code>config/quizz/</code> oder Import im Editor). Zeitlimit = Sekunden pro Frage aus dem Runden-Planer.</p>
+      <div class="row small noprint">
+        <label>Cooldown (s) <input type="number" min="3" max="15" data-meta="razziaCooldown" style="width:4em"></label>
+        <label>Minuspunkte bei falscher Antwort <input type="number" min="0" step="50" data-meta="razziaPenalty" style="width:5em"></label>
+        <button class="btn" id="exportRazzia">Razzia-JSON exportieren</button>
+      </div>
+      <p class="small" id="razziaMsg" role="status"></p>
+      <h3>Drucken</h3>
+      <div class="row noprint">
+        <button class="btn" id="printSheets">Antwortbögen (gewählte Runde)</button>
+        <button class="btn" id="printAllSheets">Antwortbögen (alle Papierrunden)</button>
+        <button class="btn" id="printCards">Moderationskarten (alle Runden)</button>
+      </div>
+      <p class="muted small">Antwortbögen werden pro angelegtem Team mit Teamnamen gedruckt, ohne Teams als leere Vorlage.</p>
     </div>
   </section>
 
@@ -380,13 +434,13 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   var LEGACY_KEY = "braintap-planung-v1";
   var TAB_KEY = "braintap-tab";
   var EVENT_DATE = new Date(2026, 10, 3);
-  var ARRAY_COLLECTIONS = ["roles", "decisions", "tasks", "rounds", "tech", "teams"];
+  var ARRAY_COLLECTIONS = ["roles", "decisions", "tasks", "rounds", "tech", "teams", "questions"];
   var uid = function () { return Math.random().toString(36).slice(2, 10); };
 
   function defaults() {
     var t = function (due, text, role) { return { id: uid(), due: due, text: text, owner: role || "", done: false }; };
     return {
-      meta: { venue: "", venueContact: "", startTime: "19:30", fee: 10, maxTeamSize: 6, prizes: "", breakAfter: 3, breakMinutes: 15 },
+      meta: { venue: "", venueContact: "", startTime: "19:30", fee: 10, maxTeamSize: 6, prizes: "", breakAfter: 3, breakMinutes: 15, razziaCooldown: 5, razziaPenalty: 0 },
       roles: [
         { id: "mod", role: "Moderation", person: "" },
         { id: "tech", role: "Technik & Razzia", person: "" },
@@ -456,7 +510,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     var d = defaults();
     var prefix = { decisions: "d", tasks: "t", rounds: "r", tech: "x" };
     ARRAY_COLLECTIONS.forEach(function (c) {
-      d[c].forEach(function (x, i) {
+      (d[c] = d[c] || []).forEach(function (x, i) {
         if (prefix[c]) x.id = prefix[c] + String(i + 1).padStart(2, "0");
         x.pos = i;
       });
@@ -828,7 +882,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       tb.appendChild(el("tr", null, [
         el("td", null, [String(i + 1)]), txt("name"), txt("mode"), num("questions", 1, 50), num("secs", 5, 600), num("buffer", 0, 30),
         el("td", { class: "num", "data-dur": r.id }), txt("anticheat"),
-        el("td", null, [el("input", { type: "checkbox", checked: r.ready, "aria-label": "Fragen fertig", onchange: function (e) { r.ready = e.target.checked; put("rounds", r); renderDerived(); } })]),
+        el("td", { class: "num", "data-qdone": r.id }),
         el("td", null, [el("button", { class: "icon noprint", "aria-label": "Runde löschen", title: "Löschen", onclick: function () {
           if (!confirm("Runde „" + r.name + "“ löschen?")) return;
           del("rounds", r.id); rebuild(); renderRounds(); renderScores(); renderAnswerSelectors();
@@ -1016,6 +1070,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     for (var n = 1; n <= (Number(round.questions) || 0); n++) {
       (function (n) {
         var sol = model.solutions[solutionId(round.id, n)];
+        if (!sol || !sol.solution) sol = { solution: bankSolution(round.id, n) };
         var solCell = isSol
           ? el("input", { type: "text", value: sol ? sol.solution || "" : "", "aria-label": "Lösung " + n, oninput: function (e) {
               put("solutions", { round_id: round.id, question: n, solution: e.target.value }, solutionId(round.id, n));
@@ -1105,6 +1160,196 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     e.target.value = "";
   });
 
+
+  /* ---------- Question bank ---------- */
+  var STATUS = [["idee", "Idee"], ["entwurf", "Entwurf"], ["fertig", "fertig"]];
+  function isRazzia(r) { return !!r && /razzia/i.test(r.mode || ""); }
+  function questionsOf(roundId) {
+    return state.questions.filter(function (q) { return q.round === roundId; });
+  }
+  function roundComplete(r) {
+    var n = Number(r.questions) || 0;
+    return n > 0 && questionsOf(r.id).filter(function (q) { return q.status === "fertig"; }).length >= n;
+  }
+  function correctOption(q) { return q.options && q.options[q.correct] ? q.options[q.correct] : ""; }
+  function bankSolution(roundId, n) {
+    var q = questionsOf(roundId)[n - 1];
+    return q ? q.solution || correctOption(q) : "";
+  }
+  function renderQuestionRounds() {
+    var sel = byId("qRound"), prev = sel.value;
+    sel.innerHTML = "";
+    state.rounds.forEach(function (r, i) {
+      var qs = questionsOf(r.id);
+      sel.appendChild(el("option", { value: r.id, text: (i + 1) + " – " + r.name + " (" + qs.length + "/" + (Number(r.questions) || 0) + ")" }));
+    });
+    if (prev && state.rounds.some(function (r) { return r.id === prev; })) sel.value = prev;
+  }
+  function renderQuestions() {
+    renderQuestionRounds();
+    var round = state.rounds.find(function (r) { return r.id === byId("qRound").value; });
+    var list = byId("qList"); list.innerHTML = "";
+    if (!round) { byId("qSummary").textContent = "Erst im Runden-Planer eine Runde anlegen."; return; }
+    var all = questionsOf(round.id), filter = byId("qFilter").value;
+    var count = function (st) { return all.filter(function (q) { return q.status === st; }).length; };
+    var planned = Number(round.questions) || 0;
+    byId("qSummary").textContent = all.length + " von " + planned + " geplanten Fragen angelegt · " + count("fertig") + " fertig · " + count("entwurf") + " Entwurf · " + count("idee") + " Idee" +
+      (all.length > planned ? " · Reserve: " + (all.length - planned) : "") +
+      " · KI-getestet: " + all.filter(function (q) { return q.aiTested; }).length;
+
+    all.forEach(function (q, idx) {
+      if (filter && q.status !== filter) return;
+      var save = function () { put("questions", q); renderDerived(); renderQuestionRounds(); };
+      var field = function (label, key, attrs) {
+        return el("label", null, [label, el("input", Object.assign({ type: "text", value: q[key] || "", oninput: function (e) { q[key] = e.target.value; save(); } }, attrs || {}))]);
+      };
+      var move = function (dir) {
+        var other = all[idx + dir]; if (!other) return;
+        var p = q.pos; q.pos = other.pos; other.pos = p;
+        if (q.pos === other.pos) q.pos += dir;
+        put("questions", q); put("questions", other); rebuild(); renderQuestions();
+      };
+      var head = el("div", { class: "q-head" }, [
+        el("b", null, ["Frage " + (idx + 1) + (idx >= planned ? " (Reserve)" : "")]),
+        el("span", { class: "row noprint" }, [
+          el("button", { class: "icon", title: "Nach oben", "aria-label": "Frage nach oben", onclick: function () { move(-1); } }, ["↑"]),
+          el("button", { class: "icon", title: "Nach unten", "aria-label": "Frage nach unten", onclick: function () { move(1); } }, ["↓"]),
+          el("button", { class: "icon", title: "Löschen", "aria-label": "Frage löschen", onclick: function () {
+            if (!confirm("Frage " + (idx + 1) + " löschen?")) return;
+            del("questions", q.id); rebuild(); renderQuestions(); renderDerived();
+          } }, ["×"])
+        ])
+      ]);
+      var text = el("textarea", { rows: 2, "aria-label": "Fragetext " + (idx + 1), placeholder: "Fragetext", oninput: function (e) { q.text = e.target.value; save(); } });
+      text.value = q.text || "";
+
+      var opts = null;
+      if (q.mc) {
+        q.options = q.options || ["", "", "", ""];
+        opts = el("div", { class: "q-opts" }, q.options.map(function (o, i) {
+          return el("div", { class: "q-opt" }, [
+            el("input", { type: "radio", name: "correct-" + q.id, checked: q.correct === i, title: "Richtige Antwort", "aria-label": "Option " + (i + 1) + " ist richtig", onchange: function () { q.correct = i; save(); } }),
+            el("input", { type: "text", value: o, placeholder: "Option " + "ABCD"[i], "aria-label": "Option " + (i + 1) + " Frage " + (idx + 1), oninput: function (e) { q.options[i] = e.target.value; save(); } })
+          ]);
+        }));
+      }
+
+      var statusSel = el("select", { "aria-label": "Status", onchange: function (e) { q.status = e.target.value; save(); renderQuestions(); } },
+        STATUS.map(function (st) { return el("option", { value: st[0], text: st[1], selected: q.status === st[0] }); }));
+      var authorSel = el("select", { "aria-label": "Autor:in", onchange: function (e) { q.author = e.target.value; save(); } },
+        [el("option", { value: "", text: "– offen –" })].concat(state.roles.map(function (r) { return el("option", { value: r.id, text: roleName(r.id), selected: q.author === r.id }); })));
+
+      list.appendChild(el("li", { class: "q " + (q.status || "idee") }, [
+        head, text, opts,
+        el("div", { class: "q-grid" }, [
+          q.mc ? null : field("Lösung", "solution", { "aria-label": "Lösung Frage " + (idx + 1) }),
+          field("Medien (URL oder Dateiname)", "media", { placeholder: "z. B. /media/dom.jpg" }),
+          field("Notiz für die Moderation", "notes"),
+          el("label", null, ["Autor:in", authorSel]),
+          el("label", null, ["Status", statusSel])
+        ]),
+        el("div", { class: "q-flags" }, [
+          el("label", null, [el("input", { type: "checkbox", checked: !!q.mc, onchange: function (e) { q.mc = e.target.checked; save(); renderQuestions(); } }), "Multiple Choice (Razzia)"]),
+          el("label", null, [el("input", { type: "checkbox", checked: !!q.aiTested, onchange: function (e) { q.aiTested = e.target.checked; save(); renderQuestions(); } }), "KI-getestet"]),
+          el("label", null, [el("input", { type: "checkbox", checked: !!q.shazamTested, onchange: function (e) { q.shazamTested = e.target.checked; save(); } }), "Shazam/Lens-getestet"])
+        ])
+      ]));
+    });
+    if (!all.length) list.appendChild(el("li", { class: "muted small" }, ["Noch keine Fragen in dieser Runde."]));
+  }
+  byId("qRound").addEventListener("change", renderQuestions);
+  byId("qFilter").addEventListener("change", renderQuestions);
+  byId("addQuestion").addEventListener("click", function () {
+    var round = state.rounds.find(function (r) { return r.id === byId("qRound").value; }); if (!round) return;
+    var mc = isRazzia(round);
+    put("questions", { id: uid(), pos: Date.now(), round: round.id, text: "", solution: "", mc: mc, options: mc ? ["", "", "", ""] : undefined, correct: 0, author: "", status: "idee", aiTested: false, shazamTested: false, media: "", notes: "" });
+    byId("qFilter").value = "";
+    rebuild(); renderQuestions(); renderDerived();
+    var areas = byId("qList").querySelectorAll("textarea"); if (areas.length) areas[areas.length - 1].focus();
+  });
+
+  /* ---------- Razzia export ---------- */
+  function mediaType(url) {
+    if (/\.(mp3|wav|ogg|m4a|aac)(\?|$)/i.test(url)) return "audio";
+    if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return "video";
+    return "image";
+  }
+  function razziaQuiz(round) {
+    var skipped = [], questions = [];
+    var cooldown = Math.min(15, Math.max(3, Math.round(Number(state.meta.razziaCooldown) || 5)));
+    var time = Math.min(120, Math.max(5, Math.round(Number(round.secs) || 20)));
+    var penalty = Math.max(0, Math.round(Number(state.meta.razziaPenalty) || 0));
+    questionsOf(round.id).forEach(function (q, i) {
+      var opts = (q.options || []).map(function (o, k) { return { text: (o || "").trim(), k: k }; }).filter(function (o) { return o.text; });
+      var correct = opts.findIndex(function (o) { return o.k === q.correct; });
+      if (!q.mc || !(q.text || "").trim() || opts.length < 2 || correct < 0) { skipped.push(i + 1); return; }
+      var item = { type: "single", question: q.text.trim(), answers: opts.map(function (o) { return o.text; }), solutions: [correct], cooldown: cooldown, time: time };
+      if (penalty) item.penalty = penalty;
+      var url = (q.media || "").trim();
+      if (/^https?:\/\//.test(url) || url.indexOf("/media/") === 0) item.media = { type: mediaType(url), url: url };
+      questions.push(item);
+    });
+    return { quiz: { gameMode: "quiz", subject: "BrainTap – " + round.name, questions: questions }, skipped: skipped };
+  }
+  byId("exportRazzia").addEventListener("click", function () {
+    var round = state.rounds.find(function (r) { return r.id === byId("qRound").value; });
+    var msg = byId("razziaMsg");
+    if (!round) { msg.textContent = "Keine Runde gewählt."; return; }
+    var res = razziaQuiz(round);
+    if (!res.quiz.questions.length) { msg.textContent = "Keine exportierbaren Fragen: Razzia braucht Multiple-Choice-Fragen mit Fragetext, mindestens 2 Optionen und markierter richtiger Antwort."; return; }
+    var slug = round.name.toLowerCase().replace(/[^a-z0-9äöüß]+/g, "-").replace(/^-|-$/g, "");
+    download(new Blob([JSON.stringify(res.quiz, null, 2)], { type: "application/json" }), "braintap-" + slug + ".json");
+    msg.textContent = res.quiz.questions.length + " Fragen exportiert" + (res.skipped.length ? ". Übersprungen (unvollständig): Frage " + res.skipped.join(", ") : ".");
+  });
+
+  /* ---------- Print views ---------- */
+  function esc(x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function printDoc(title, body) {
+    var w = window.open("", "_blank");
+    if (!w) { alert("Bitte Pop-ups für diese Seite erlauben, um zu drucken."); return; }
+    w.document.write('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' +
+      'body{font:12pt/1.4 system-ui,sans-serif;color:#000;margin:0}.page{padding:14mm 16mm;break-after:page}.page:last-child{break-after:auto}' +
+      'h1{font-size:16pt;margin:0 0 2mm}.sub{color:#444;margin:0 0 6mm;font-size:10pt}.team{font-size:14pt;border-bottom:1px solid #000;padding-bottom:2mm;margin-bottom:6mm}' +
+      'table{width:100%;border-collapse:collapse}td,th{border:1px solid #000;padding:2.5mm 3mm;text-align:left;vertical-align:top}th{font-size:9pt}' +
+      '.nr{width:10mm;text-align:right}.pts{width:18mm}.ans{height:9mm}.sum td{font-weight:700}.sol{color:#333;font-size:10pt}.mc{font-size:10pt;margin-top:1mm}' +
+      '.card{border:1px solid #000;border-radius:2mm;padding:3mm 4mm;margin-bottom:3mm;break-inside:avoid}.card b{font-size:11pt}.note{font-size:9pt;color:#444}' +
+      '@page{size:A4;margin:0}</style></head><body>' + body + '<script>window.onload=function(){window.print()}<\/script></body></html>');
+    w.document.close();
+  }
+  function sheetPages(round) {
+    var idx = state.rounds.indexOf(round) + 1;
+    var n = Math.max(Number(round.questions) || 0, 1);
+    var rows = ""; for (var i = 1; i <= n; i++) rows += '<tr><td class="nr">' + i + '</td><td class="ans"></td><td class="pts"></td></tr>';
+    var teams = state.teams.length ? state.teams.map(function (t) { return t.name; }) : [""];
+    return teams.map(function (name) {
+      return '<section class="page"><h1>Runde ' + idx + ': ' + esc(round.name) + '</h1><p class="sub">BrainTap Pub-Quiz · 3. November 2026 · ' + esc(round.mode) + '</p>' +
+        '<div class="team">Team: <b>' + esc(name) + '</b></div><table><thead><tr><th class="nr">Nr.</th><th>Antwort</th><th class="pts">Punkte</th></tr></thead><tbody>' + rows +
+        '</tbody><tfoot><tr class="sum"><td></td><td style="text-align:right">Summe</td><td></td></tr></tfoot></table></section>';
+    }).join("");
+  }
+  byId("printSheets").addEventListener("click", function () {
+    var round = state.rounds.find(function (r) { return r.id === byId("qRound").value; }); if (!round) return;
+    printDoc("Antwortbögen " + round.name, sheetPages(round));
+  });
+  byId("printAllSheets").addEventListener("click", function () {
+    var rounds = state.rounds.filter(function (r) { return !isRazzia(r); });
+    printDoc("Antwortbögen alle Papierrunden", rounds.map(sheetPages).join(""));
+  });
+  byId("printCards").addEventListener("click", function () {
+    var body = state.rounds.map(function (r, i) {
+      var qs = questionsOf(r.id);
+      var cards = qs.map(function (q, k) {
+        var mc = q.mc && q.options ? '<div class="mc">' + q.options.map(function (o, j) { return o ? "ABCD"[j] + ") " + esc(o) + (j === q.correct ? " ✓" : "") : ""; }).filter(Boolean).join(" · ") + "</div>" : "";
+        return '<div class="card"><b>' + (k + 1) + '. ' + esc(q.text || "(ohne Text)") + '</b>' + mc +
+          '<div class="sol">Lösung: <b>' + esc(q.solution || correctOption(q) || "–") + '</b></div>' +
+          (q.media ? '<div class="note">Medien: ' + esc(q.media) + '</div>' : "") +
+          (q.notes ? '<div class="note">Notiz: ' + esc(q.notes) + '</div>' : "") + '</div>';
+      }).join("") || '<p class="note">Noch keine Fragen.</p>';
+      return '<section class="page"><h1>Runde ' + (i + 1) + ': ' + esc(r.name) + '</h1><p class="sub">' + esc(r.mode) + ' · ' + (Number(r.secs) || 0) + ' s pro Frage · ' + esc(r.anticheat || "") + '</p>' + cards + '</section>';
+    }).join("");
+    printDoc("Moderationskarten", body);
+  });
+
   /* ---------- Derived values (no input re-render, keeps focus) ---------- */
   function renderDerived() {
     var total = 0;
@@ -1113,6 +1358,12 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       var c = document.querySelector('[data-dur="' + r.id + '"]'); if (c) c.textContent = mins + " min";
     });
     byId("roundTotal").textContent = total + " min";
+    state.rounds.forEach(function (r) {
+      var c = document.querySelector('[data-qdone="' + r.id + '"]'); if (!c) return;
+      var qs = questionsOf(r.id), done = qs.filter(function (q) { return q.status === "fertig"; }).length;
+      c.textContent = done + "/" + (Number(r.questions) || 0);
+      c.className = "num " + (roundComplete(r) ? "ok-text" : "");
+    });
     renderRunOfShow();
 
     totals(null).forEach(function (x) {
@@ -1145,7 +1396,9 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     var wrap = byId("progressStats"); wrap.innerHTML = "";
     wrap.appendChild(bar("Entscheidungen geklärt", c(state.decisions), state.decisions.length));
     wrap.appendChild(bar("To-dos erledigt", c(state.tasks), state.tasks.length));
-    wrap.appendChild(bar("Runden mit fertigen Fragen", c(state.rounds, function (r) { return r.ready; }), state.rounds.length));
+    var planned = state.rounds.reduce(function (sum, r) { return sum + (Number(r.questions) || 0); }, 0);
+    wrap.appendChild(bar("Fragen fertig", Math.min(planned, c(state.questions, function (q) { return q.status === "fertig"; })), planned));
+    wrap.appendChild(bar("Runden komplett", c(state.rounds, roundComplete), state.rounds.length));
     wrap.appendChild(bar("Technik abgehakt", c(state.tech), state.tech.length));
     var now = today();
     var next = state.tasks.filter(function (t) { return !t.done; }).sort(function (a, b) { return a.due.localeCompare(b.due); }).slice(0, 3);
@@ -1210,7 +1463,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
 
   function renderAll() {
     document.querySelectorAll("[data-meta]").forEach(function (inp) { inp.value = state.meta[inp.dataset.meta] != null ? state.meta[inp.dataset.meta] : ""; });
-    renderRoles(); renderDecisions(); renderTasks(); renderRounds(); renderTech(); renderTeams(); renderScores(); renderCountdown(); renderAnswerSelectors();
+    renderRoles(); renderDecisions(); renderTasks(); renderRounds(); renderTech(); renderTeams(); renderScores(); renderCountdown(); renderAnswerSelectors(); renderQuestions();
   }
 
   /* ---------- Start ---------- */
