@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrainTap Pub-Quiz</title>
+<style>
+:root {
+  --bg: #f6f4ef; --surface: #ffffff; --surface-2: #efece4; --text: #1d1b16; --muted: #6b665b;
+  --border: #ddd8cc; --accent: #b5452b; --accent-text: #ffffff; --focus: #2563eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15140f; --surface: #1f1d17; --surface-2: #29261e; --text: #efeadf; --muted: #a59f90;
+    --border: #3a362b; --accent: #e0714f; --accent-text: #1a0d08; --focus: #7aa7ff;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15140f; --surface: #1f1d17; --surface-2: #29261e; --text: #efeadf; --muted: #a59f90;
+  --border: #3a362b; --accent: #e0714f; --accent-text: #1a0d08; --focus: #7aa7ff;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 40px 16px 64px; }
+.eyebrow { color: var(--accent); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: .8rem; margin: 0; }
+h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); line-height: 1.15; margin: 6px 0 10px; letter-spacing: -0.02em; }
+.lead { color: var(--muted); font-size: 1.1rem; margin: 0 0 28px; max-width: 60ch; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 32px; }
+.fact { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.fact b { display: block; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.fact span { color: var(--muted); font-size: .85rem; }
+a.cta { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--accent); color: var(--accent-text); text-decoration: none; border-radius: 12px; padding: 18px 20px; font-size: 1.15rem; font-weight: 600; margin-bottom: 12px; }
+a.cta:hover { filter: brightness(1.06); }
+a.cta small { display: block; font-weight: 400; font-size: .9rem; opacity: .9; }
+a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+h2 { font-size: 1.1rem; margin: 36px 0 10px; }
+ul.links { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+ul.links a { display: block; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; color: var(--text); text-decoration: none; }
+ul.links a:hover { border-color: var(--accent); }
+ul.links span { display: block; color: var(--muted); font-size: .9rem; }
+ol.agenda { padding-left: 1.2em; }
+ol.agenda li { margin-bottom: 6px; }
+footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <p class="eyebrow">Planungssession</p>
+  <h1>BrainTap Pub-Quiz</h1>
+  <p class="lead">Dienstag, 3. November 2026 in Köln/Bonn. Hybrid-Format: Fragen auf dem Beamer, Papierrunden, eine digitale Speed-Runde mit Razzia, ein gemeinsames Scoreboard.</p>
+
+  <div class="facts">
+    <div class="fact"><b id="days">–</b><span>Tage bis zum Quiz</span></div>
+    <div class="fact"><b>~40</b><span>Personen</span></div>
+    <div class="fact"><b>6–10</b><span>Teams</span></div>
+    <div class="fact"><b>6</b><span>Runden</span></div>
+  </div>
+
+  <a class="cta" href="planung.html">
+    <span>Planungstool öffnen<small>Entscheidungen, Zeitplan, Runden, Technik, Teams, Antworten und Scoreboard</small></span>
+    <span aria-hidden="true">→</span>
+  </a>
+
+  <h2>Ablauf der Planungssession</h2>
+  <ol class="agenda">
+    <li><b>Rollen verteilen</b>: Moderation, Technik &amp; Razzia, Auswertung, Einlass &amp; Kasse, Fragen &amp; Medien.</li>
+    <li><b>Offene Entscheidungen</b> durchgehen: Beamer, Sound, WLAN, Razzia-Stand, Plan B, Startgeld.</li>
+    <li><b>Runden festlegen</b>: Themen, Anzahl Fragen, Zeitfenster und wer welche Fragen schreibt.</li>
+    <li><b>Zeitplan</b> bis zum 3. November bestätigen und Verantwortliche eintragen.</li>
+    <li>Stand <b>exportieren</b> und im Team teilen (JSON für die Planung, <code>.sqlite</code> für die Antworten).</li>
+  </ol>
+
+  <h2>Recherche</h2>
+  <ul class="links">
+    <li><a href="docs/recherche-schummelsicheres-pubquiz.md">Schummelsicheres Pub-Quiz<span>Tools, Formate, Antwortzeiten, google-feste Fragen, Musik gegen Shazam</span></a></li>
+    <li><a href="docs/recherche-open-source-selbst-hosten.md">Digitales Pub-Quiz selbst hosten<span>Razzia, ClassQuiz, Scoreboards, Buzzer, LAN vs. VPS</span></a></li>
+    <li><a href="https://github.com/netzkontrast/Razzia/tree/dev">Razzia-Fork (Zweig dev)<span>Quiz-Software für die Speed-Runde</span></a></li>
+  </ul>
+
+  <footer>Alle Eingaben im Planungstool bleiben im Browser. Nichts wird an einen Server gesendet.</footer>
+</main>
+<script>
+(function () {
+  var t = new Date(); t.setHours(0, 0, 0, 0);
+  var d = Math.round((new Date(2026, 10, 3) - t) / 86400000);
+  document.getElementById("days").textContent = d > 0 ? d : d === 0 ? "Heute" : "vorbei";
+})();
+</script>
+</body>
+</html>
