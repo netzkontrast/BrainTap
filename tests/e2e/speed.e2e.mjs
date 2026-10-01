@@ -103,7 +103,7 @@ test("a team phone plays the speed round and the points reach the scoreboard", a
   await phone.waitForSelector("input.field[disabled]", { timeout: 10000 })
   assert.match(await phone.textContent("#answerStatus"), /Zeit um\. Eure Antwort: Domplatte/)
   await orga.click("button[aria-label='Richtig – Die Kölschen']")
-  await orga.waitForFunction(() => document.querySelector("#spTeams td.num")?.textContent === "1", null, { timeout: 10000 })
+  await orga.waitForFunction(() => document.querySelector("#spTeams tr td:nth-child(6)")?.textContent === "1", null, { timeout: 10000 })
   await orga.click("#spEnd")
   await phone.waitForSelector("text=Speed-Runde vorbei", { timeout: 10000 })
 

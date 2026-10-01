@@ -111,7 +111,10 @@ describe("speed round", () => {
     await orgaDo({ action: "reveal" })
     const after = await teamGet(t1)
     assert.equal(after.body.state.solution, "B) Rhein")
-    assert.deepEqual(after.body.mine, { answer: "B) Rhein", points: 1 })
+    assert.equal(after.body.mine.answer, "B) Rhein")
+    assert.equal(after.body.mine.points, 1)
+    assert.ok(after.body.mine.ms >= 0, "the answer time is reported after the reveal")
+    assert.deepEqual(after.body.standing, { points: 1, rank: 1, of: 2 })
   })
 
   test("speed answers reach the regular answers table and the organisers' delta sync", async () => {
@@ -154,6 +157,41 @@ describe("speed round", () => {
     const view = await teamGet(t1)
     assert.equal(view.body.state.status, "closed", "the question closes by the server clock")
     assert.equal((await teamDo(t1, { action: "answer", n: 1, choice: 1 })).status, 409)
+  })
+
+  test("tempo points reward fast right answers; organiser verdicts use the same rule", async () => {
+    const t1 = await joinAs("t1")
+    const t2 = await joinAs("t2")
+    await orgaDo({ action: "open", roundId: "rt", roundName: "Tempo", of: 2, points: 2, tempo: true })
+    await orgaDo({ action: "show", n: 1, secs: 4, question: MC, solution: { correct: 1 } })
+    assert.equal((await teamDo(t1, { action: "answer", n: 1, choice: 1 })).status, 200)
+    await new Promise((r) => setTimeout(r, 2000))
+    assert.equal((await teamDo(t2, { action: "answer", n: 1, choice: 1 })).status, 200)
+    let o = await orgaDo({ action: "close" })
+    const a = Object.fromEntries(o.body.answers.filter((x) => x.question === 1).map((x) => [x.team_id, x]))
+    assert.ok(a.t1.points > 1.8 && a.t1.points <= 2, `fast answer earns nearly all: ${a.t1.points}`)
+    assert.ok(a.t2.points >= 1 && a.t2.points < 1.6, `slower answer earns less: ${a.t2.points}`)
+    assert.ok(a.t1.ms < a.t2.ms)
+    const view = await teamGet(t2)
+    assert.equal(view.body.state.scoring.tempo, true)
+
+    // Free text judged by an organiser: "right" applies the tempo rule too.
+    await orgaDo({ action: "show", n: 2, secs: 10, question: { kind: "text", text: "Spitzname des Doms?" }, solution: { text: "Kölner Dom" } })
+    await teamDo(t1, { action: "answer", n: 2, answer: "Dom" })
+    o = await orgaDo({ action: "close" })
+    assert.equal(o.body.answers.find((x) => x.team_id === "t1" && x.question === 2).points, null)
+    o = await orgaDo({ action: "score", teamId: "t1", n: 2, verdict: "right" })
+    const judged = o.body.answers.find((x) => x.team_id === "t1" && x.question === 2).points
+    assert.ok(judged > 1.5 && judged <= 2, `judged right with tempo: ${judged}`)
+    o = await orgaDo({ action: "score", teamId: "t1", n: 2, verdict: "wrong" })
+    assert.equal(o.body.answers.find((x) => x.team_id === "t1" && x.question === 2).points, 0)
+
+    await orgaDo({ action: "reveal" })
+    const s1 = (await teamGet(t1)).body.standing
+    const s2 = (await teamGet(t2)).body.standing
+    assert.equal(s1.rank, 1)
+    assert.equal(s2.rank, 2)
+    assert.ok(s1.points > s2.points)
   })
 
   test("ten teams answering in the same moment all land", async () => {

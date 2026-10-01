@@ -60,6 +60,17 @@ button, input { font: inherit; }
 .result.bad { color: var(--bad); }
 .notice { margin-top: auto; padding-top: 24px; color: var(--muted); font-size: .85rem; text-align: center; }
 .offline { background: var(--surface-2); border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; font-size: .9rem; }
+.media { display: block; max-width: 100%; max-height: 38vh; margin: 0 auto 14px; border-radius: 10px; }
+.hint { font-size: .85rem; color: var(--muted); margin: -8px 0 12px; }
+.standing { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-weight: 650; }
+.board { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; counter-reset: rank; }
+.board li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); font-variant-numeric: tabular-nums; }
+.board li b { font-weight: 800; }
+.board li.top { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
+.join-qr { display: flex; gap: 4vw; align-items: center; justify-content: center; flex-wrap: wrap; text-align: left; }
+.join-url { font-size: clamp(1.2rem, 2.6vw, 3rem); font-weight: 800; margin: 0 0 12px; overflow-wrap: anywhere; }
+.join-qr > div:last-child { flex: 1 1 300px; max-width: 60ch; }
+.join-qr svg { width: min(34vh, 60vw); height: auto; background: #fff; padding: 12px; border-radius: 12px; }
 /* Beamer */
 body.screen main { max-width: none; padding: 4vh 5vw; }
 body.screen header { font-size: 2.2vw; }
@@ -71,6 +82,10 @@ body.screen .meta { font-size: 1.8vw; }
 body.screen .card { padding: 3vw; }
 body.screen .bar { height: 2vh; }
 body.screen .status { font-size: clamp(1.2rem, 2.2vw, 2.6rem); }
+body.screen .board li { font-size: clamp(1.1rem, 2.2vw, 2.4rem); padding: 1vh 1.5vw; }
+body.screen .media { max-height: 42vh; }
+body.screen .reveal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3vw; align-items: start; }
+body.screen .sol-big { font-size: clamp(1.8rem, 4vw, 4.5rem); font-weight: 800; color: var(--ok); margin: 0 0 1vh; }
 </style>
 </head>
 <body>
@@ -119,6 +134,49 @@ body.screen .status { font-size: clamp(1.2rem, 2.2vw, 2.6rem); }
     });
   }
   function now() { return Date.now() + offset; }
+  function fmtSecs(ms) { return (ms / 1000).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " s"; }
+  function fmtPts(p) { return Number(p).toLocaleString("de-DE", { maximumFractionDigits: 1 }); }
+  function media(q) {
+    var src = q && q.media;
+    if (!src) return null;
+    if (/\.(png|jpe?g|webp|gif|svg|avif)(\?|$)/i.test(src)) return el("img", { class: "media", src: src, alt: "" });
+    // Sound only on the beamer; phones stay silent.
+    if (SCREEN && /\.(mp3|ogg|wav|m4a)(\?|$)/i.test(src)) return el("audio", { class: "media", src: src, controls: true, autoplay: true });
+    return null;
+  }
+  // Points per team in the running round (beamer: from the organiser view).
+  function totals() {
+    var sums = {};
+    (data.answers || []).forEach(function (a) { if (a.points != null) sums[a.team_id] = (sums[a.team_id] || 0) + a.points; });
+    return (data.teams || []).map(function (t) { return { name: t.name, pts: Math.round((sums[t.id] || 0) * 10) / 10 }; })
+      .sort(function (a, b) { return b.pts - a.pts || a.name.localeCompare(b.name); });
+  }
+  function board(limit) {
+    var list = totals(), prev = null, rank = 0;
+    return el("ol", { class: "board", "aria-label": "Stand der Speed-Runde" }, list.slice(0, limit).map(function (x, i) {
+      if (x.pts !== prev) { rank = i + 1; prev = x.pts; }
+      return el("li", { class: rank === 1 ? "top" : null }, [el("span", null, [el("b", { text: rank + ". " }), x.name]), el("span", { text: fmtPts(x.pts) + " P." })]);
+    }));
+  }
+  function standingLine() {
+    var s = data.standing;
+    return s ? el("p", { class: "standing", text: "Platz " + s.rank + " von " + s.of + " · " + fmtPts(s.points) + " Punkte in dieser Runde" }) : null;
+  }
+
+  // Phones: keep the screen on while playing, buzz when a question opens.
+  var wakeLock = null, buzzedFor = null;
+  function keepAwake() {
+    if (SCREEN || !navigator.wakeLock || wakeLock || document.visibilityState !== "visible") return;
+    navigator.wakeLock.request("screen").then(function (l) {
+      wakeLock = l; l.addEventListener("release", function () { wakeLock = null; });
+    }).catch(function () { /* not allowed here; the page still works */ });
+  }
+  function buzz(st) {
+    var k = st.roundId + "|" + st.n;
+    if (SCREEN || st.status !== "question" || buzzedFor === k) return;
+    if (buzzedFor !== null && navigator.vibrate) navigator.vibrate([120, 60, 120]);
+    buzzedFor = k;
+  }
   function secondsLeft(st) { return Math.max(0, Math.ceil((st.endsAt - now()) / 1000)); }
   function live(st) { return st.status === "question" && st.endsAt > now(); }
 
@@ -141,13 +199,15 @@ body.screen .status { font-size: clamp(1.2rem, 2.2vw, 2.6rem); }
       if (j.httpStatus >= 400) throw new Error(j.error || "HTTP " + j.httpStatus);
       offset = j.serverTime - Date.now();
       data = j;
+      if (data.state) buzz(data.state);
+      if (data.team) keepAwake();
       if (pending) sendPending();
       render();
     }).catch(function () {
       document.getElementById("offline").hidden = false;
     }).then(schedule, schedule);
   }
-  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") poll(); });
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { poll(); if (data && data.team) keepAwake(); } });
   window.addEventListener("online", poll);
 
   /* ---------- Join ---------- */
@@ -247,13 +307,15 @@ body.screen .status { font-size: clamp(1.2rem, 2.2vw, 2.6rem); }
     var text = st.status === "done" ? "Danke! Das Handy darf jetzt wieder in die Tasche."
       : st.status === "lobby" ? "Ihr seid verbunden. Die erste Frage erscheint hier automatisch."
       : "Die Moderation startet die Runde gleich. Diese Seite einfach offen lassen.";
-    if (SCREEN) {
-      var joined = data.joins ? Object.keys(data.joins).length : 0;
-      text = st.status === "lobby" || st.status === "off" ? joined + " von " + (data.teams || []).length + " Teams verbunden" : text;
+    if (SCREEN && st.status === "done") {
+      view.replaceChildren(el("div", { class: "card" }, [el("h1", { text: "Endstand der Speed-Runde" }), board(20)]));
+      return;
     }
+    if (SCREEN) return renderScreenLobby();
     view.replaceChildren(el("div", { class: "card center" }, [
       el("div", { class: "big", "aria-hidden": "true", text: st.status === "done" ? "🏁" : "⚡" }),
       el("h1", { text: title }), el("p", { class: "muted", text: text }),
+      st.status === "done" ? standingLine() : null,
     ]));
   }
   function renderQuestion(st) {
@@ -261,7 +323,8 @@ body.screen .status { font-size: clamp(1.2rem, 2.2vw, 2.6rem); }
     var open = live(st);
     if (draftFor !== key()) { draftFor = key(); draft = ""; picked = null; }
     var mine = data.mine && data.mine.answer;
-    var body = [questionHead(st)].concat(countdown(st)).concat([el("p", { class: "question", text: q.text || "" })]);
+    var body = [questionHead(st)].concat(countdown(st)).concat([el("p", { class: "question", text: q.text || "" }), media(q)]);
+    if (st.scoring && st.scoring.tempo && open) body.push(el("p", { class: "hint", text: "Tempo-Punkte: je schneller richtig, desto mehr Punkte." }));
     if (q.kind === "mc") {
       body.push(el("div", { class: "options", role: "group", "aria-label": "Antwortmöglichkeiten" }, (q.options || []).map(function (o, i) {
         if (!o) return null;
@@ -288,13 +351,16 @@ body.screen .status { font-size: clamp(1.2rem, 2.2vw, 2.6rem); }
   function renderReveal(st) {
     clearInterval(ticker);
     var mine = data.mine;
-    var verdict = mine && mine.points != null ? (mine.points > 0 ? "Richtig! +" + mine.points : "Leider falsch") : mine ? "Wird von der Moderation gewertet" : "Keine Antwort abgegeben";
+    var verdict = mine && mine.points != null
+      ? (mine.points > 0 ? "Richtig! +" + fmtPts(mine.points) + (mine.ms != null ? " · in " + fmtSecs(mine.ms) : "") : "Leider falsch")
+      : mine ? "Wird von der Moderation gewertet" : "Keine Antwort abgegeben";
     view.replaceChildren(el("div", { class: "card" }, [
       questionHead(st),
       el("p", { class: "question", text: st.question ? st.question.text : "" }),
       el("p", { class: "muted", text: "Lösung" }), el("p", { class: "result", text: st.solution || "–" }),
       mine ? el("p", { class: "muted", text: "Eure Antwort: " + mine.answer }) : null,
       el("p", { class: "result " + (mine && mine.points > 0 ? "ok" : mine && mine.points === 0 ? "bad" : ""), text: verdict }),
+      standingLine(),
     ]));
   }
   function renderScreenQuestion(st) {
@@ -303,11 +369,50 @@ body.screen .status { font-size: clamp(1.2rem, 2.2vw, 2.6rem); }
     var body = [questionHead(st)];
     if (st.status !== "reveal") body = body.concat(countdown(st)); else clearInterval(ticker);
     body.push(el("p", { class: "question", text: q.text || "" }));
-    if (q.kind === "mc") body.push(el("div", { class: "options" }, (q.options || []).map(function (o, i) {
+    if (st.status !== "reveal") body.push(media(q));
+    if (q.kind === "mc" && st.status !== "reveal") body.push(el("div", { class: "options" }, (q.options || []).map(function (o, i) {
       return o ? el("div", { class: "opt", "aria-pressed": String(st.status === "reveal" && data.solution.indexOf("ABCDEF"[i] + ")") === 0) }, [el("b", { text: "ABCDEF"[i] }), el("span", { text: o })]) : null;
     })));
-    body.push(el("p", { class: "status", text: st.status === "reveal" ? "Lösung: " + (data.solution || "–") : answered + " von " + (data.teams || []).length + " Teams haben geantwortet" }));
+    if (st.status === "reveal") {
+      var fastest = (data.answers || []).filter(function (a) { return a.question === st.n && a.points > 0 && a.ms != null; })
+        .sort(function (a, b) { return a.ms - b.ms; })[0];
+      var team = fastest && (data.teams || []).find(function (t) { return t.id === fastest.team_id; });
+      var right = (data.answers || []).filter(function (a) { return a.question === st.n && a.points > 0; }).length;
+      body.push(el("div", { class: "reveal-grid" }, [
+        el("div", null, [
+          el("p", { class: "muted", text: "Lösung" }),
+          el("p", { class: "sol-big", text: data.solution || "–" }),
+          el("p", { class: "status", text: right + " von " + (data.teams || []).length + " Teams richtig" }),
+          team ? el("p", { class: "status", text: "⚡ Am schnellsten: " + team.name + " in " + fmtSecs(fastest.ms) }) : null,
+        ]),
+        board(10),
+      ]));
+    } else {
+      body.push(el("p", { class: "status", text: answered + " von " + (data.teams || []).length + " Teams haben geantwortet" }));
+    }
     view.replaceChildren(el("div", { class: "card" }, body));
+  }
+  // Beamer before the first question: a QR code to the team page and who is in.
+  var qrLoading = null;
+  function renderScreenLobby() {
+    var url = location.origin + location.pathname;
+    var joined = data.joins ? Object.keys(data.joins).length : 0;
+    var sig = "lobby|" + joined + "|" + (data.teams || []).length;
+    if (view.dataset.lobby === sig && view.querySelector(".join-qr")) return; // no flicker every poll
+    view.dataset.lobby = sig;
+    var box = el("div", { class: "qrbox", "aria-hidden": "true" });
+    view.replaceChildren(el("div", { class: "card" }, [
+      el("div", { class: "join-qr" }, [box, el("div", null, [
+        el("h1", { text: "Speed-Runde: ein Handy pro Team" }),
+        el("p", { class: "join-url", text: url.replace(/^https?:\/\//, "") }),
+        el("p", { class: "muted", text: "QR-Code scannen oder Adresse öffnen, dann den Code von der Tischkarte eingeben." }),
+        el("p", { class: "status", text: joined + " von " + (data.teams || []).length + " Teams verbunden" }),
+      ])]),
+    ]));
+    function draw() { if (window.qrcode) { var q = window.qrcode(0, "M"); q.addData(url); q.make(); box.innerHTML = q.createSvgTag({ cellSize: 4, margin: 0, scalable: true }); } }
+    if (window.qrcode) return draw();
+    qrLoading = qrLoading || new Promise(function (res) { var sc = document.createElement("script"); sc.src = "vendor/qrcode/qrcode.js"; sc.onload = res; sc.onerror = res; document.head.appendChild(sc); });
+    qrLoading.then(draw);
   }
 
   poll();

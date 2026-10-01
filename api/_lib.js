@@ -108,6 +108,14 @@ async function migrate(c) {
       `CREATE TABLE IF NOT EXISTS speed_joins (
         team_id TEXT PRIMARY KEY,
         joined_at INTEGER NOT NULL)`,
+      // How long after the question opened each team's latest answer came in
+      // (server clock), for tempo points and "fastest team".
+      `CREATE TABLE IF NOT EXISTS speed_times (
+        round_id TEXT NOT NULL,
+        question INTEGER NOT NULL,
+        team_id TEXT NOT NULL,
+        ms INTEGER NOT NULL,
+        PRIMARY KEY (round_id, question, team_id))`,
     ],
     "write",
   )

@@ -17,7 +17,10 @@ Die digitale Speed-Runde läuft direkt in BrainTap auf Vercel, ohne Docker und o
 - **Orga** steuert im Tab *Speed-Runde*: Runde öffnen, Fragen nacheinander starten, Zeit stoppen, auflösen, beenden. Die Fragen kommen aus der Fragen-Bank der gewählten Runde (gleiche Nummerierung wie Beamer und Antwortbögen).
 - **Server-Uhr**: `api/speed.js` setzt Start und Ende jeder Frage; verspätete Antworten werden abgelehnt. Multiple Choice und exakt passende Freitext-Antworten werden automatisch gewertet, alles andere per ✓/✗.
 - **Scoreboard**: Antworten landen in derselben `answers`-Tabelle wie die Papierrunden und zählen sofort.
-- **Beamer**: `speed.html?screen=1` (mit Orga-Anmeldung) zeigt Frage, Countdown und wie viele Teams geantwortet haben.
+- **Punkte**: frei wählbare Punkte pro richtige Antwort; mit **Tempo-Punkten** bringt eine richtige Antwort je nach verbleibender Zeit zwischen der Hälfte und allen Punkten. Die Antwortzeit misst der Server; ✓/✗ der Orga rechnet nach derselben Regel.
+- **Beamer**: `speed.html?screen=1` (mit Orga-Anmeldung) zeigt vor der ersten Frage einen QR-Code zur Team-Seite, dann Frage (mit Bild oder Ton aus der Fragen-Bank), Countdown und Zahl der Antworten, nach dem Auflösen die Lösung, das schnellste richtige Team und den Stand der Runde.
+- **Handys** bleiben während der Runde wach, vibrieren bei jeder neuen Frage und zeigen nach dem Auflösen Punkte, Antwortzeit und den eigenen Platz.
+- **Tischkarten** mit QR-Code und Team-Code druckt der Tab *Speed-Runde* (`vendor/qrcode`, MIT).
 
 Die Geräte fragen den Stand jede Sekunde ab; Verbindungsabbrüche überstehen sie, weil der Spielstand in der Datenbank liegt und nicht im Speicher einer Funktion. Razzia selbst (Socket.IO mit Spielständen im Arbeitsspeicher) ließe sich auf Vercel nicht zuverlässig betreiben.
 

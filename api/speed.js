@@ -63,16 +63,38 @@ function publicState(st, solution, now) {
     endsAt: st.endsAt,
     question: showsQuestion ? st.question : null,
     solution: status === "reveal" ? solutionText(st.question, solution) : null,
+    scoring: st.scoring ?? { points: 1, tempo: false },
   }
 }
 
-// Points a team gets automatically. Free text that does not match exactly
-// stays unscored (null) for an organiser to judge; estimates are ranked later.
-function autoPoints(question, solution, entry) {
+// Whether an answer is right (true), wrong (false) or needs an organiser
+// (null): free text that does not match exactly, and estimates, which are
+// ranked later.
+function verdict(question, solution, entry) {
   if (!solution) return null
-  if (question.kind === "mc") return entry.choice === solution.correct ? 1 : 0
-  if (question.kind === "text" && solution.text) return normalize(entry.answer) === normalize(solution.text) ? 1 : null
+  if (question.kind === "mc") return entry.choice === solution.correct
+  if (question.kind === "text" && solution.text) return normalize(entry.answer) === normalize(solution.text) ? true : null
   return null
+}
+
+// Scoring of the running round: `points` for a right answer; with tempo on,
+// a right answer earns between half and all of it, depending on how much of
+// the time was left (rounded to tenths).
+function scoring(body, fallback = { points: 1, tempo: false }) {
+  const points = Number(body.points)
+  return {
+    points: Number.isFinite(points) && points > 0 && points <= 100 ? points : fallback.points,
+    tempo: typeof body.tempo === "boolean" ? body.tempo : fallback.tempo,
+  }
+}
+
+function pointsFor(right, ms, st) {
+  if (right == null) return null
+  if (!right) return 0
+  const { points, tempo } = st.scoring ?? { points: 1, tempo: false }
+  if (!tempo || ms == null || !st.secs) return points
+  const left = Math.min(1, Math.max(0, 1 - ms / (st.secs * 1000)))
+  return Math.round(points * (0.5 + 0.5 * left) * 10) / 10
 }
 
 async function readGame(c, extra = []) {
@@ -107,7 +129,9 @@ async function orgaView(c, now) {
   const { st, solution, rest } = await readGame(c, [
     "SELECT id, data FROM items WHERE collection = 'teams' AND deleted = 0",
     "SELECT team_id, joined_at FROM speed_joins",
-    `SELECT team_id, question, answer, points FROM answers WHERE round_id = ${ROUND_OF_GAME}`,
+    `SELECT a.team_id, a.question, a.answer, a.points, t.ms FROM answers a
+     LEFT JOIN speed_times t ON t.round_id = a.round_id AND t.question = a.question AND t.team_id = a.team_id
+     WHERE a.round_id = ${ROUND_OF_GAME}`,
   ])
   const [teamRows, joins, answers] = rest
   return {
@@ -121,6 +145,7 @@ async function orgaView(c, now) {
       question: Number(r.question),
       answer: r.answer,
       points: r.points == null ? null : Number(r.points),
+      ms: r.ms == null ? null : Number(r.ms),
     })),
   }
 }
@@ -143,7 +168,7 @@ async function orgaAction(c, body, now) {
       const roundId = asString(body.roundId, 200)
       if (!roundId) throw new HttpError(400, "Runde fehlt")
       const of = Math.max(1, Math.min(100, Number(body.of) || 1))
-      await c.batch([save({ roundId, roundName: asString(body.roundName, 200), status: "lobby", n: 0, of, secs: 0, endsAt: 0, question: null }), saveSolution(null)], "write")
+      await c.batch([save({ roundId, roundName: asString(body.roundName, 200), status: "lobby", n: 0, of, secs: 0, endsAt: 0, question: null, scoring: scoring(body) }), saveSolution(null)], "write")
       return
     }
     case "show": {
@@ -155,7 +180,7 @@ async function orgaAction(c, body, now) {
       const correct = Number.isInteger(body.solution?.correct) ? body.solution.correct : null
       const solution = { correct, text: asString(body.solution?.text, 500) }
       await c.batch([
-        save({ ...st, status: "question", n, secs, startedAt: now, endsAt: now + secs * 1000, question }),
+        save({ ...st, status: "question", n, secs, startedAt: now, endsAt: now + secs * 1000, question, scoring: scoring(body, st.scoring) }),
         saveSolution(solution),
       ], "write")
       return
@@ -173,15 +198,25 @@ async function orgaAction(c, body, now) {
       await c.batch([save({ ...st, status: "done", question: null, endsAt: Math.min(st.endsAt || now, now) }), saveSolution(null)], "write")
       return
     case "reset":
-      await c.batch(["DELETE FROM speed", "DELETE FROM speed_joins"], "write")
+      await c.batch(["DELETE FROM speed", "DELETE FROM speed_joins", "DELETE FROM speed_times"], "write")
       return
     case "score": {
-      // An organiser overrides the points of one team's answer.
+      // An organiser judges one team's answer: verdict "right" / "wrong" /
+      // "open" scores it like the automatic check (tempo included); a number
+      // in `points` sets the points directly.
       if (!st) throw new HttpError(409, "Keine Speed-Runde aktiv")
       const teamId = asString(body.teamId, 200)
       const n = Number(body.n)
-      const points = body.points == null ? null : Number(body.points)
-      if (!teamId || !Number.isInteger(n) || (points != null && !Number.isFinite(points))) throw new HttpError(400, "Ungültige Wertung")
+      if (!teamId || !Number.isInteger(n)) throw new HttpError(400, "Ungültige Wertung")
+      let points
+      if (["right", "wrong", "open"].includes(body.verdict)) {
+        const t = await c.execute({ sql: "SELECT ms FROM speed_times WHERE round_id = ? AND question = ? AND team_id = ?", args: [st.roundId, n, teamId] })
+        const ms = t.rows[0] ? Number(t.rows[0].ms) : null
+        points = pointsFor(body.verdict === "open" ? null : body.verdict === "right", ms, st)
+      } else {
+        points = body.points == null ? null : Number(body.points)
+        if (points != null && !Number.isFinite(points)) throw new HttpError(400, "Ungültige Wertung")
+      }
       await c.batch([
         "UPDATE sync_rev SET v = v + 1 WHERE id = 1",
         {
@@ -243,18 +278,36 @@ async function teamView(c, teamId, now) {
   const { st, solution, rest } = await readGame(c, [
     { sql: "SELECT data FROM items WHERE collection = 'teams' AND id = ? AND deleted = 0", args: [teamId] },
     {
-      sql: `SELECT answer, points FROM answers WHERE team_id = ? AND round_id = ${ROUND_OF_GAME}
-            AND question = (SELECT json_extract(data, '$.n') FROM speed WHERE key = 'state')`,
+      sql: `SELECT a.answer, a.points, t.ms FROM answers a
+            LEFT JOIN speed_times t ON t.round_id = a.round_id AND t.question = a.question AND t.team_id = a.team_id
+            WHERE a.team_id = ? AND a.round_id = ${ROUND_OF_GAME}
+            AND a.question = (SELECT json_extract(data, '$.n') FROM speed WHERE key = 'state')`,
       args: [teamId],
     },
+    `SELECT i.id AS team_id, COALESCE(SUM(a.points), 0) AS pts FROM items i
+     LEFT JOIN answers a ON a.team_id = i.id AND a.round_id = ${ROUND_OF_GAME}
+     WHERE i.collection = 'teams' AND i.deleted = 0 GROUP BY i.id`,
   ])
   const [teamRow, mineRow] = rest.map((r) => r.rows[0])
   if (!teamRow) throw new HttpError(401, "Team nicht mehr vorhanden")
   const view = publicState(st, solution, now)
+  const revealed = view.status === "reveal" || view.status === "done"
   const mine = mineRow
-    ? { answer: mineRow.answer, points: view.status === "reveal" && mineRow.points != null ? Number(mineRow.points) : null }
+    ? {
+        answer: mineRow.answer,
+        points: view.status === "reveal" && mineRow.points != null ? Number(mineRow.points) : null,
+        ms: view.status === "reveal" && mineRow.ms != null ? Number(mineRow.ms) : null,
+      }
     : null
-  return { serverTime: now, team: { id: teamId, name: JSON.parse(teamRow.data).name || "Team" }, state: view, mine }
+  // The team's own standing in this round once a question is resolved; the
+  // other teams' points stay on the beamer.
+  let standing = null
+  if (revealed) {
+    const totals = rest[2].rows.map((r) => ({ id: r.team_id, pts: Number(r.pts) }))
+    const own = totals.find((t) => t.id === teamId)
+    if (own) standing = { points: own.pts, rank: 1 + totals.filter((t) => t.pts > own.pts).length, of: totals.length }
+  }
+  return { serverTime: now, team: { id: teamId, name: JSON.parse(teamRow.data).name || "Team" }, state: view, mine, standing }
 }
 
 async function answer(c, teamId, body, now) {
@@ -273,9 +326,15 @@ async function answer(c, teamId, body, now) {
     if (!text) throw new HttpError(400, "Leere Antwort")
     entry = { answer: text }
   }
-  const points = autoPoints(q, solution, entry)
+  const ms = Math.max(0, Math.min(now, st.endsAt) - st.startedAt)
+  const points = pointsFor(verdict(q, solution, entry), ms, st)
   await c.batch([
     "UPDATE sync_rev SET v = v + 1 WHERE id = 1",
+    {
+      sql: `INSERT INTO speed_times (round_id, question, team_id, ms) VALUES (?, ?, ?, ?)
+            ON CONFLICT (round_id, question, team_id) DO UPDATE SET ms = excluded.ms`,
+      args: [st.roundId, st.n, teamId, ms],
+    },
     {
       sql: `INSERT INTO answers (team_id, round_id, question, answer, points, updated_at, rev, changed_by, changed_at)
             VALUES (?, ?, ?, ?, ?, ?, ${REV}, 'Speed-Runde', ?)
@@ -285,7 +344,7 @@ async function answer(c, teamId, body, now) {
       args: [teamId, st.roundId, st.n, entry.answer, points, now, now],
     },
   ], "write")
-  return json({ ok: true, answer: entry.answer })
+  return json({ ok: true, answer: entry.answer, ms })
 }
 
 /* ---------- Routes ---------- */

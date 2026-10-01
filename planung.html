@@ -508,6 +508,8 @@ a.sso[hidden] { display: none; }
       <div class="row noprint" style="margin-bottom:10px">
         <label class="small">Runde <select id="spRound"></select></label>
         <label class="small">Sekunden pro Frage <input type="number" id="spSecs" min="3" max="600" style="width:5em"></label>
+        <label class="small">Punkte pro richtige Antwort <input type="number" id="spPoints" min="0.5" max="100" step="0.5" value="1" style="width:5em"></label>
+        <label class="small" title="Richtige Antworten bringen je nach Tempo zwischen der Hälfte und allen Punkten"><input type="checkbox" id="spTempo"> Tempo-Punkte</label>
       </div>
       <p id="spStatus" class="sp-status" role="status">Noch nicht gestartet</p>
       <div class="row noprint sp-controls">
@@ -520,9 +522,10 @@ a.sso[hidden] { display: none; }
       </div>
       <div id="spQuestion" class="sp-question" hidden></div>
       <div class="tablewrap"><table>
-        <thead><tr><th>Team</th><th>Code</th><th>Gerät</th><th>Antwort</th><th class="num">Punkte</th><th class="noprint">Wertung</th></tr></thead>
+        <thead><tr><th>Team</th><th>Code</th><th>Gerät</th><th>Antwort</th><th class="num">Zeit</th><th class="num">Punkte</th><th class="noprint">Wertung</th><th class="num">Runde</th></tr></thead>
         <tbody id="spTeams"></tbody>
       </table></div>
+      <p class="small" id="spFastest"></p>
       <div class="row noprint" style="margin-top:12px">
         <button class="btn" id="spCards">Tischkarten mit Codes drucken</button>
         <button class="btn" id="spReset" title="Spielstand und verbundene Geräte zurücksetzen; Antworten bleiben erhalten">Zurücksetzen</button>
@@ -578,6 +581,7 @@ a.sso[hidden] { display: none; }
   <ol id="beamerList"></ol>
 </div>
 
+<script src="vendor/qrcode/qrcode.js" defer></script>
 <script>
 (function () {
   "use strict";
@@ -2183,9 +2187,9 @@ a.sso[hidden] { display: none; }
     var solText = override && override.solution ? override.solution : q.solution || correctOption(q);
     if (q.mc) {
       var options = (q.options || []).map(function (o) { return (o || "").trim(); });
-      return { question: { kind: "mc", text: q.text, options: options }, solution: { correct: Number(q.correct) || 0, text: solText } };
+      return { question: { kind: "mc", text: q.text, options: options, media: q.media || "" }, solution: { correct: Number(q.correct) || 0, text: solText } };
     }
-    return { question: { kind: q.estimate ? "estimate" : "text", text: q.text }, solution: { text: solText } };
+    return { question: { kind: q.estimate ? "estimate" : "text", text: q.text, media: q.media || "" }, solution: { text: solText } };
   }
   function speedNext() {
     var round = speedRound(); if (!round) return;
@@ -2196,9 +2200,21 @@ a.sso[hidden] { display: none; }
     if (n > of) { byId("spMsg").textContent = "Alle " + of + " Fragen gespielt. „Runde beenden“ drücken."; return; }
     var payload;
     try { payload = speedPayload(round, n); } catch (err) { byId("spMsg").textContent = err.message; return; }
-    var go = function () { return speedCall(Object.assign({ action: "show", n: n, secs: Number(byId("spSecs").value) || Number(round.secs) || 20 }, payload)); };
+    var go = function () { return speedCall(Object.assign({ action: "show", n: n, secs: Number(byId("spSecs").value) || Number(round.secs) || 20 }, speedScoring(), payload)); };
     if (sameRound) go();
-    else speedCall({ action: "open", roundId: round.id, roundName: round.name, of: of }).then(function (ok) { if (ok) go(); });
+    else speedCall(Object.assign({ action: "open", roundId: round.id, roundName: round.name, of: of }, speedScoring())).then(function (ok) { if (ok) go(); });
+  }
+  function speedScoring() {
+    return { points: Number(byId("spPoints").value) || 1, tempo: byId("spTempo").checked };
+  }
+  function fmtSecs(ms) { return ms == null ? "" : (ms / 1000).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " s"; }
+  function fmtPts(p) { return p == null ? "" : Number(p).toLocaleString("de-DE", { maximumFractionDigits: 1 }); }
+  // Points per team in the running speed round, highest first.
+  function speedTotals(d) {
+    var sums = {};
+    d.answers.forEach(function (a) { if (a.points != null) sums[a.team_id] = (sums[a.team_id] || 0) + a.points; });
+    return d.teams.map(function (t) { return { team: t, pts: Math.round((sums[t.id] || 0) * 10) / 10 }; })
+      .sort(function (a, b) { return b.pts - a.pts || a.team.name.localeCompare(b.team.name); });
   }
   function speedApply(j) {
     speed.data = j;
@@ -2242,15 +2258,25 @@ a.sso[hidden] { display: none; }
         el("div", { class: "sol small" }, ["Lösung: " + (d.solution || "–")]));
     }
 
+    if (running && st.scoring && document.activeElement !== byId("spPoints")) {
+      byId("spPoints").value = st.scoring.points; byId("spTempo").checked = !!st.scoring.tempo;
+    }
+    var totals = {};
+    if (running) speedTotals(d).forEach(function (x) { totals[x.team.id] = x.pts; });
+    var fastest = running && st.n ? d.answers.filter(function (a) { return a.question === st.n && a.points > 0 && a.ms != null; })
+      .sort(function (a, b) { return a.ms - b.ms; })[0] : null;
+    var fastTeam = fastest && d.teams.find(function (t) { return t.id === fastest.team_id; });
+    byId("spFastest").textContent = fastTeam ? "Schnellste richtige Antwort: " + fastTeam.name + " in " + fmtSecs(fastest.ms) : "";
+
     var tb = byId("spTeams"); tb.innerHTML = "";
     var answers = {};
     (d ? d.answers : []).forEach(function (a) { if (running && a.question === st.n) answers[a.team_id] = a; });
     var teams = d ? d.teams : state.teams.map(function (t) { return { id: t.id, name: t.name, code: "…" }; });
     teams.forEach(function (t) {
       var a = answers[t.id], joined = d && d.joins[t.id];
-      var mark = function (pts, text, title) {
+      var mark = function (verdict, text, title) {
         return el("button", { class: "btn", title: title, "aria-label": title + " – " + t.name, disabled: !running || !st.n, onclick: function () {
-          speedCall({ action: "score", teamId: t.id, n: st.n, points: pts });
+          speedCall({ action: "score", teamId: t.id, n: st.n, verdict: verdict });
         } }, [text]);
       };
       tb.appendChild(el("tr", null, [
@@ -2258,16 +2284,18 @@ a.sso[hidden] { display: none; }
         el("td", null, [el("code", null, [t.code])]),
         el("td", null, [joined ? el("span", { class: "tag ok" }, ["verbunden"]) : el("span", { class: "tag open" }, ["fehlt"])]),
         el("td", null, [a && a.answer ? a.answer : running && st.n ? "–" : ""]),
-        el("td", { class: "num" }, [a && a.points != null ? String(a.points) : a && a.answer ? "?" : ""]),
-        el("td", { class: "noprint" }, [mark(1, "✓", "Richtig"), " ", mark(0, "✗", "Falsch"), " ", mark(null, "?", "Offen")]),
+        el("td", { class: "num" }, [a ? fmtSecs(a.ms) : ""]),
+        el("td", { class: "num" }, [a && a.points != null ? fmtPts(a.points) : a && a.answer ? "?" : ""]),
+        el("td", { class: "noprint" }, [mark("right", "✓", "Richtig"), " ", mark("wrong", "✗", "Falsch"), " ", mark("open", "?", "Offen")]),
+        el("td", { class: "num" }, [running ? fmtPts(totals[t.id]) : ""]),
       ]));
     });
-    if (!teams.length) tb.appendChild(el("tr", null, [el("td", { colspan: 6, class: "muted" }, ["Noch keine Teams angelegt (Tab „Teams & Scoreboard“)."])]));
+    if (!teams.length) tb.appendChild(el("tr", null, [el("td", { colspan: 8, class: "muted" }, ["Noch keine Teams angelegt (Tab „Teams & Scoreboard“)."])]));
   }
   byId("spRound").addEventListener("change", function () { var r = speedRound(); if (r) byId("spSecs").value = Number(r.secs) || 20; renderSpeed(); });
   byId("spOpen").addEventListener("click", function () {
     var r = speedRound(); if (!r) return;
-    speedCall({ action: "open", roundId: r.id, roundName: r.name, of: Number(r.questions) || 1 });
+    speedCall(Object.assign({ action: "open", roundId: r.id, roundName: r.name, of: Number(r.questions) || 1 }, speedScoring()));
   });
   byId("spNext").addEventListener("click", speedNext);
   byId("spClose").addEventListener("click", function () { speedCall({ action: "close" }); });
@@ -2282,17 +2310,24 @@ a.sso[hidden] { display: none; }
     var url = location.origin + location.pathname.replace(/[^/]*$/, "") + "speed.html";
     var w = window.open("", "_blank"); if (!w) return;
     var cards = d.teams.map(function (t) {
-      return '<section class="c"><p class="k">Speed-Runde · Team</p><h2>' + esc(t.name) + '</h2><p class="code">' + esc(t.code) + '</p>' +
-        '<p>Ein Handy pro Team: <b>' + esc(url.replace(/^https?:\/\//, "")) + '</b> öffnen und den Code eingeben.</p>' +
-        '<p class="u">' + esc(url + "?code=" + t.code) + '</p></section>';
+      return '<section class="c"><div class="qr">' + qrSvg(url + "?code=" + t.code) + '</div><div><p class="k">Speed-Runde · Team</p><h2>' + esc(t.name) + '</h2><p class="code">' + esc(t.code) + '</p>' +
+        '<p>Ein Handy pro Team: QR-Code scannen – oder <b>' + esc(url.replace(/^https?:\/\//, "")) + '</b> öffnen und den Code eingeben.</p></div></section>';
     }).join("");
     w.document.write('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Tischkarten Speed-Runde</title><style>' +
       'body{font:14px/1.4 system-ui,sans-serif;margin:16px;color:#111;background:#fff}main{display:grid;grid-template-columns:1fr 1fr;gap:12px}' +
-      '.c{border:2px dashed #999;border-radius:10px;padding:16px;break-inside:avoid}.k{margin:0;color:#b5452b;font-weight:700;text-transform:uppercase;font-size:.75rem;letter-spacing:.08em}' +
+      '.c{border:2px dashed #999;border-radius:10px;padding:16px;break-inside:avoid;display:flex;gap:14px;align-items:center}.qr svg{width:120px;height:120px;display:block}.k{margin:0;color:#b5452b;font-weight:700;text-transform:uppercase;font-size:.75rem;letter-spacing:.08em}' +
       'h2{margin:4px 0 6px}.code{font-size:2.4rem;font-weight:800;letter-spacing:.3em;margin:6px 0}.u{font-size:.75rem;color:#555;word-break:break-all}' +
       '@media(max-width:600px){main{grid-template-columns:1fr}}</style></head><body><main>' + cards + '</main><script>print()<\/script></body></html>');
     w.document.close();
   });
+
+  // QR code as inline SVG (vendor/qrcode, loaded with the page); empty when
+  // the library is unavailable, the printed code still works.
+  function qrSvg(text) {
+    if (typeof window.qrcode !== "function") return "";
+    var q = window.qrcode(0, "M"); q.addData(text); q.make();
+    return q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+  }
 
   /* ---------- Start ---------- */
   var cached = readStorage(CACHE_KEY);

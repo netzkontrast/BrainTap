@@ -1,8 +1,8 @@
 // Keeps the planning pages loadable without network (e.g. when the pub's
 // internet drops). HTML is network-first so updates arrive as soon as we are
 // online; the API is never cached, the page buffers writes itself.
-const CACHE = "braintap-shell-v2"
-const SHELL = ["./", "index.html", "planung.html", "speed.html", "vendor/sqljs/sql-wasm.js", "vendor/sqljs/sql-wasm.wasm"]
+const CACHE = "braintap-shell-v3"
+const SHELL = ["./", "index.html", "planung.html", "speed.html", "vendor/qrcode/qrcode.js", "vendor/sqljs/sql-wasm.js", "vendor/sqljs/sql-wasm.wasm"]
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()))
