@@ -32,6 +32,7 @@ h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); line-height: 1.15; margin: 6px 0 10p
 .fact span { color: var(--muted); font-size: .85rem; }
 a.cta { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--accent); color: var(--accent-text); text-decoration: none; border-radius: 12px; padding: 18px 20px; font-size: 1.15rem; font-weight: 600; margin-bottom: 12px; }
 a.cta:hover { filter: brightness(1.06); }
+a.cta.alt { background: var(--surface); color: var(--text); border: 2px solid var(--accent); }
 a.cta small { display: block; font-weight: 400; font-size: .9rem; opacity: .9; }
 a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 h2 { font-size: 1.1rem; margin: 36px 0 10px; }
@@ -48,7 +49,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
 <main class="wrap">
   <p class="eyebrow">Planungssession</p>
   <h1>BrainTap Pub-Quiz</h1>
-  <p class="lead">Dienstag, 3. November 2026 in Köln/Bonn. Hybrid-Format: Fragen auf dem Beamer, Papierrunden, eine digitale Speed-Runde mit Razzia, ein gemeinsames Scoreboard.</p>
+  <p class="lead">Dienstag, 3. November 2026 in Köln/Bonn. Hybrid-Format: Fragen auf dem Beamer, Papierrunden, eine digitale Speed-Runde mit einem Gerät pro Team, ein gemeinsames Scoreboard.</p>
 
   <div class="facts">
     <div class="fact"><b id="days">–</b><span>Tage bis zum Quiz</span></div>
@@ -62,10 +63,15 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
     <span aria-hidden="true">→</span>
   </a>
 
+  <a class="cta alt" href="speed.html">
+    <span>Speed-Runde mitspielen<small>Für die Teams: ein Handy pro Team, Team-Code von der Tischkarte eingeben</small></span>
+    <span aria-hidden="true">⚡</span>
+  </a>
+
   <h2>Ablauf der Planungssession</h2>
   <ol class="agenda">
-    <li><b>Rollen verteilen</b>: Moderation, Technik &amp; Razzia, Auswertung, Einlass &amp; Kasse, Fragen &amp; Medien.</li>
-    <li><b>Offene Entscheidungen</b> durchgehen: Beamer, Sound, WLAN, Razzia-Stand, Plan B, Startgeld.</li>
+    <li><b>Rollen verteilen</b>: Moderation, Technik &amp; Speed-Runde, Auswertung, Einlass &amp; Kasse, Fragen &amp; Medien.</li>
+    <li><b>Offene Entscheidungen</b> durchgehen: Beamer, Sound, WLAN, Speed-Runde, Plan B, Startgeld.</li>
     <li><b>Runden festlegen</b>: Themen, Anzahl Fragen, Zeitfenster und wer welche Fragen schreibt.</li>
     <li><b>Zeitplan</b> bis zum 3. November bestätigen und Verantwortliche eintragen.</li>
     <li>Stand <b>exportieren</b> und im Team teilen (JSON für die Planung, <code>.sqlite</code> für die Antworten).</li>
@@ -75,7 +81,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
   <ul class="links">
     <li><a href="docs/recherche-schummelsicheres-pubquiz.md">Schummelsicheres Pub-Quiz<span>Tools, Formate, Antwortzeiten, google-feste Fragen, Musik gegen Shazam</span></a></li>
     <li><a href="docs/recherche-open-source-selbst-hosten.md">Digitales Pub-Quiz selbst hosten<span>Razzia, ClassQuiz, Scoreboards, Buzzer, LAN vs. VPS</span></a></li>
-    <li><a href="https://github.com/netzkontrast/Razzia/tree/dev">Razzia-Fork (Zweig dev)<span>Quiz-Software für die Speed-Runde</span></a></li>
+    <li><a href="https://github.com/netzkontrast/Razzia/tree/dev">Razzia-Fork (Zweig dev)<span>Vorbild der Speed-Runde; die Runde selbst läuft jetzt direkt in BrainTap auf Vercel</span></a></li>
   </ul>
 
   <footer>Das Planungstool speichert alles passwortgeschützt auf dem Server und funktioniert auch kurzzeitig offline.</footer>

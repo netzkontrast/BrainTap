@@ -44,7 +44,7 @@ const sameBytes = (a, b) => a && b && a.length === b.length && a.every((x, i) =>
  *   `save` must throw SnapshotConflict when the stored file is no longer `etag`
  *   (or, for `etag === null`, when a file already exists).
  */
-export function createSnapshotClient(storage, { attempts = 8 } = {}) {
+export function createSnapshotClient(storage, { attempts = 16 } = {}) {
   async function batch(stmts, mode = "read") {
     const SQL = await sqlJs()
     for (let attempt = 0; attempt < attempts; attempt++) {

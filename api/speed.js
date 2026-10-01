@@ -1,0 +1,304 @@
+import {
+  cookie,
+  db,
+  handle,
+  HttpError,
+  json,
+  readJson,
+  requireAuth,
+  session,
+  TEAM_COOKIE,
+  TEAM_MAX_AGE,
+  teamCode,
+  teamSession,
+  teamToken,
+} from "./_lib.js"
+
+// Digital speed round without WebSockets: the organisers drive the game state
+// here, the team devices (speed.html) poll it. The server clock decides when a
+// question opens and closes; answers land in the regular answers table, so the
+// scoreboard picks them up like any paper round.
+
+const GRACE_MS = 1500 // network latency of the last-second answer
+const LETTERS = "ABCDEF"
+const REV = "(SELECT v FROM sync_rev WHERE id = 1)"
+
+function normalize(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .replace(/ß/g, "ss")
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+}
+
+// What a question looks like once it is open: the status reported to teams
+// turns from "question" to "closed" as soon as the time is up, no write needed.
+function effectiveStatus(st, now) {
+  if (!st) return "off"
+  return st.status === "question" && now > st.endsAt ? "closed" : st.status
+}
+
+function solutionText(question, solution) {
+  if (!solution) return ""
+  if (question?.kind === "mc" && Number.isInteger(solution.correct)) {
+    const opt = question.options?.[solution.correct]
+    return opt ? `${LETTERS[solution.correct]}) ${opt}` : ""
+  }
+  return solution.text ?? ""
+}
+
+function publicState(st, solution, now) {
+  const status = effectiveStatus(st, now)
+  if (status === "off") return { status }
+  const showsQuestion = status === "question" || status === "closed" || status === "reveal"
+  return {
+    status,
+    roundId: st.roundId,
+    roundName: st.roundName,
+    n: st.n,
+    of: st.of,
+    secs: st.secs,
+    endsAt: st.endsAt,
+    question: showsQuestion ? st.question : null,
+    solution: status === "reveal" ? solutionText(st.question, solution) : null,
+  }
+}
+
+// Points a team gets automatically. Free text that does not match exactly
+// stays unscored (null) for an organiser to judge; estimates are ranked later.
+function autoPoints(question, solution, entry) {
+  if (!solution) return null
+  if (question.kind === "mc") return entry.choice === solution.correct ? 1 : 0
+  if (question.kind === "text" && solution.text) return normalize(entry.answer) === normalize(solution.text) ? 1 : null
+  return null
+}
+
+async function readGame(c, extra = []) {
+  const out = await c.batch(
+    ["SELECT data FROM speed WHERE key = 'state'", "SELECT data FROM speed WHERE key = 'solution'", ...extra],
+    "read",
+  )
+  const parse = (r) => (r.rows[0] ? JSON.parse(r.rows[0].data) : null)
+  return { st: parse(out[0]), solution: parse(out[1]), rest: out.slice(2) }
+}
+
+function teamList(rows) {
+  return rows
+    .map((row) => ({ id: row.id, ...JSON.parse(row.data) }))
+    .sort((a, b) => (Number(a.pos) || 0) - (Number(b.pos) || 0))
+    .map((t) => ({ id: t.id, name: t.name || "Team" }))
+}
+
+async function teams(c) {
+  const r = await c.execute("SELECT id, data FROM items WHERE collection = 'teams' AND deleted = 0")
+  return teamList(r.rows)
+}
+
+const asString = (v, max) => (typeof v === "string" ? v.slice(0, max) : "")
+
+/* ---------- Organisers ---------- */
+
+const ROUND_OF_GAME = "(SELECT json_extract(data, '$.roundId') FROM speed WHERE key = 'state')"
+
+async function orgaView(c, now) {
+  // One read batch, so a poll costs a single snapshot download.
+  const { st, solution, rest } = await readGame(c, [
+    "SELECT id, data FROM items WHERE collection = 'teams' AND deleted = 0",
+    "SELECT team_id, joined_at FROM speed_joins",
+    `SELECT team_id, question, answer, points FROM answers WHERE round_id = ${ROUND_OF_GAME}`,
+  ])
+  const [teamRows, joins, answers] = rest
+  return {
+    serverTime: now,
+    state: st ? { ...st, status: effectiveStatus(st, now) } : { status: "off" },
+    solution: st ? solutionText(st.question, solution) : "",
+    teams: teamList(teamRows.rows).map((t) => ({ ...t, code: teamCode(t.id) })),
+    joins: Object.fromEntries(joins.rows.map((r) => [r.team_id, Number(r.joined_at)])),
+    answers: answers.rows.map((r) => ({
+      team_id: r.team_id,
+      question: Number(r.question),
+      answer: r.answer,
+      points: r.points == null ? null : Number(r.points),
+    })),
+  }
+}
+
+function validQuestion(q) {
+  const kind = ["mc", "text", "estimate"].includes(q?.kind) ? q.kind : null
+  if (!kind) throw new HttpError(400, "Ungültiger Fragetyp")
+  const options = kind === "mc" && Array.isArray(q.options) ? q.options.slice(0, LETTERS.length).map((o) => asString(o, 300)) : undefined
+  if (kind === "mc" && (!options || options.filter(Boolean).length < 2)) throw new HttpError(400, "Multiple Choice braucht mindestens zwei Optionen")
+  return { kind, text: asString(q.text, 2000), media: asString(q.media, 500) || undefined, options }
+}
+
+async function orgaAction(c, body, now) {
+  const { st } = await readGame(c)
+  const save = (data) => ({ sql: "INSERT INTO speed (key, data) VALUES ('state', ?) ON CONFLICT (key) DO UPDATE SET data = excluded.data", args: [JSON.stringify(data)] })
+  const saveSolution = (data) => ({ sql: "INSERT INTO speed (key, data) VALUES ('solution', ?) ON CONFLICT (key) DO UPDATE SET data = excluded.data", args: [JSON.stringify(data)] })
+
+  switch (body.action) {
+    case "open": {
+      const roundId = asString(body.roundId, 200)
+      if (!roundId) throw new HttpError(400, "Runde fehlt")
+      const of = Math.max(1, Math.min(100, Number(body.of) || 1))
+      await c.batch([save({ roundId, roundName: asString(body.roundName, 200), status: "lobby", n: 0, of, secs: 0, endsAt: 0, question: null }), saveSolution(null)], "write")
+      return
+    }
+    case "show": {
+      if (!st) throw new HttpError(409, "Erst die Speed-Runde öffnen")
+      const n = Number(body.n)
+      if (!Number.isInteger(n) || n < 1 || n > st.of) throw new HttpError(400, "Ungültige Fragennummer")
+      const secs = Math.max(3, Math.min(600, Math.round(Number(body.secs) || 20)))
+      const question = validQuestion(body.question)
+      const correct = Number.isInteger(body.solution?.correct) ? body.solution.correct : null
+      const solution = { correct, text: asString(body.solution?.text, 500) }
+      await c.batch([
+        save({ ...st, status: "question", n, secs, startedAt: now, endsAt: now + secs * 1000, question }),
+        saveSolution(solution),
+      ], "write")
+      return
+    }
+    case "close":
+      if (!st) throw new HttpError(409, "Keine Speed-Runde aktiv")
+      await c.batch([save({ ...st, status: st.status === "question" ? "closed" : st.status, endsAt: Math.min(st.endsAt || now, now) })], "write")
+      return
+    case "reveal":
+      if (!st || !st.question) throw new HttpError(409, "Keine Frage zum Auflösen")
+      await c.batch([save({ ...st, status: "reveal", endsAt: Math.min(st.endsAt || now, now) })], "write")
+      return
+    case "end":
+      if (!st) throw new HttpError(409, "Keine Speed-Runde aktiv")
+      await c.batch([save({ ...st, status: "done", question: null, endsAt: Math.min(st.endsAt || now, now) }), saveSolution(null)], "write")
+      return
+    case "reset":
+      await c.batch(["DELETE FROM speed", "DELETE FROM speed_joins"], "write")
+      return
+    case "score": {
+      // An organiser overrides the points of one team's answer.
+      if (!st) throw new HttpError(409, "Keine Speed-Runde aktiv")
+      const teamId = asString(body.teamId, 200)
+      const n = Number(body.n)
+      const points = body.points == null ? null : Number(body.points)
+      if (!teamId || !Number.isInteger(n) || (points != null && !Number.isFinite(points))) throw new HttpError(400, "Ungültige Wertung")
+      await c.batch([
+        "UPDATE sync_rev SET v = v + 1 WHERE id = 1",
+        {
+          sql: `INSERT INTO answers (team_id, round_id, question, answer, points, updated_at, rev, changed_by, changed_at)
+                VALUES (?, ?, ?, NULL, ?, ?, ${REV}, 'Speed-Runde', ?)
+                ON CONFLICT (team_id, round_id, question) DO UPDATE SET
+                  points = excluded.points, updated_at = excluded.updated_at, rev = excluded.rev,
+                  changed_by = excluded.changed_by, changed_at = excluded.changed_at`,
+          args: [teamId, st.roundId, n, points, now, now],
+        },
+      ], "write")
+      return
+    }
+    default:
+      throw new HttpError(400, "Unbekannte Aktion")
+  }
+}
+
+/* ---------- Teams ---------- */
+
+async function join(c, body) {
+  const code = String(body.code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
+  const team = code.length === 5 ? (await teams(c)).find((t) => teamCode(t.id) === code) : null
+  if (!team) {
+    await new Promise((r) => setTimeout(r, 400)) // slows down guessing
+    throw new HttpError(404, "Unbekannter Team-Code")
+  }
+  await c.batch([{
+    sql: "INSERT INTO speed_joins (team_id, joined_at) VALUES (?, ?) ON CONFLICT (team_id) DO UPDATE SET joined_at = excluded.joined_at",
+    args: [team.id, Date.now()],
+  }], "write")
+  return json(
+    { ok: true, team },
+    { headers: { "set-cookie": cookie(TEAM_COOKIE, teamToken(team.id), { maxAge: TEAM_MAX_AGE }) } },
+  )
+}
+
+async function teamView(c, teamId, now) {
+  const { st, solution, rest } = await readGame(c, [
+    { sql: "SELECT data FROM items WHERE collection = 'teams' AND id = ? AND deleted = 0", args: [teamId] },
+    {
+      sql: `SELECT answer, points FROM answers WHERE team_id = ? AND round_id = ${ROUND_OF_GAME}
+            AND question = (SELECT json_extract(data, '$.n') FROM speed WHERE key = 'state')`,
+      args: [teamId],
+    },
+  ])
+  const [teamRow, mineRow] = rest.map((r) => r.rows[0])
+  if (!teamRow) throw new HttpError(401, "Team nicht mehr vorhanden")
+  const view = publicState(st, solution, now)
+  const mine = mineRow
+    ? { answer: mineRow.answer, points: view.status === "reveal" && mineRow.points != null ? Number(mineRow.points) : null }
+    : null
+  return { serverTime: now, team: { id: teamId, name: JSON.parse(teamRow.data).name || "Team" }, state: view, mine }
+}
+
+async function answer(c, teamId, body, now) {
+  const { st, solution } = await readGame(c)
+  if (effectiveStatus(st, now - GRACE_MS) !== "question" || Number(body.n) !== st.n) {
+    throw new HttpError(409, "Zeit abgelaufen")
+  }
+  const q = st.question
+  let entry
+  if (q.kind === "mc") {
+    const choice = Number(body.choice)
+    if (!Number.isInteger(choice) || !q.options?.[choice]) throw new HttpError(400, "Ungültige Auswahl")
+    entry = { choice, answer: `${LETTERS[choice]}) ${q.options[choice]}` }
+  } else {
+    const text = asString(body.answer, 300).trim()
+    if (!text) throw new HttpError(400, "Leere Antwort")
+    entry = { answer: text }
+  }
+  const points = autoPoints(q, solution, entry)
+  await c.batch([
+    "UPDATE sync_rev SET v = v + 1 WHERE id = 1",
+    {
+      sql: `INSERT INTO answers (team_id, round_id, question, answer, points, updated_at, rev, changed_by, changed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ${REV}, 'Speed-Runde', ?)
+            ON CONFLICT (team_id, round_id, question) DO UPDATE SET
+              answer = excluded.answer, points = excluded.points, updated_at = excluded.updated_at,
+              rev = excluded.rev, changed_by = excluded.changed_by, changed_at = excluded.changed_at`,
+      args: [teamId, st.roundId, st.n, entry.answer, points, now, now],
+    },
+  ], "write")
+  return json({ ok: true, answer: entry.answer })
+}
+
+/* ---------- Routes ---------- */
+
+export const GET = handle(async (request) => {
+  const now = Date.now()
+  const c = await db()
+  const view = new URL(request.url).searchParams.get("view")
+  if (view === "orga") {
+    requireAuth(request)
+    return json(await orgaView(c, now))
+  }
+  const team = teamSession(request)
+  if (!team) {
+    throw new HttpError(401, session(request) ? "Dieses Gerät ist als Orga angemeldet, nicht als Team" : "Bitte Team-Code eingeben")
+  }
+  return json(await teamView(c, team.teamId, now))
+})
+
+export const POST = handle(async (request) => {
+  const now = Date.now()
+  const body = await readJson(request)
+  const c = await db()
+  if (body.action === "join") return join(c, body)
+  if (body.action === "leave") {
+    return json({ ok: true }, { headers: { "set-cookie": cookie(TEAM_COOKIE, "", { maxAge: 0 }) } })
+  }
+  if (body.action === "answer") {
+    const team = teamSession(request)
+    if (!team) throw new HttpError(401, "Bitte Team-Code eingeben")
+    return answer(c, team.teamId, body, now)
+  }
+  requireAuth(request)
+  await orgaAction(c, body, now)
+  return json(await orgaView(c, now))
+})
