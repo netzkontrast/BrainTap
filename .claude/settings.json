@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test)",
+      "Bash(npm run test:e2e)",
+      "Bash(CHROMIUM_PATH=/opt/pw-browsers/chromium npm run test:e2e)",
+      "mcp__Vercel__list_integration_configurations",
+      "mcp__Vercel__filter_project_envs",
+      "mcp__Vercel__search_vercel_documentation",
+      "mcp__Vercel__list_projects"
+    ]
+  }
+}
