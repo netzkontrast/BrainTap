@@ -2,7 +2,8 @@ import { createClient } from "@libsql/client"
 import { createHmac, timingSafeEqual } from "node:crypto"
 
 export const COOKIE = "bt_auth"
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 60
+const SESSION_DAYS = 30
+const COOKIE_MAX_AGE = 60 * 60 * 24 * SESSION_DAYS
 
 // Collections stored as JSON rows in `items`. Answers and solutions get their
 // own tables so they can be queried and exported as plain SQL.
@@ -141,10 +142,23 @@ function password() {
   return pw
 }
 
-export function sessionToken() {
-  return createHmac("sha256", password())
-    .update("braintap-session-v1")
+// "<expiry ms>.<hmac>": the expiry is part of the signed message, so it can't
+// be extended by hand. Tokens are stateless; changing ORGA_PASSWORD revokes
+// every session at once.
+export function sessionToken(expiresAt = Date.now() + COOKIE_MAX_AGE * 1000) {
+  const sig = createHmac("sha256", password())
+    .update(`braintap-session-v2|${expiresAt}`)
     .digest("hex")
+  return `${expiresAt}.${sig}`
+}
+
+function validToken(token) {
+  const [exp, sig] = String(token).split(".")
+  const expiresAt = Number(exp)
+  if (!sig || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) {
+    return false
+  }
+  return safeEqual(token, sessionToken(expiresAt))
 }
 
 function safeEqual(a, b) {
@@ -162,7 +176,11 @@ function readCookie(request, name) {
   for (const part of header.split(";")) {
     const [k, ...v] = part.trim().split("=")
     if (k === name) {
-      return decodeURIComponent(v.join("="))
+      try {
+        return decodeURIComponent(v.join("="))
+      } catch {
+        return null
+      }
     }
   }
   return null
@@ -170,7 +188,7 @@ function readCookie(request, name) {
 
 export function requireAuth(request) {
   const token = readCookie(request, COOKIE)
-  if (!token || !safeEqual(token, sessionToken())) {
+  if (!token || !validToken(token)) {
     throw new HttpError(401, "Nicht angemeldet")
   }
 }

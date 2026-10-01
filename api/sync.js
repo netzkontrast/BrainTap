@@ -16,6 +16,9 @@ const REV = "(SELECT v FROM sync_rev WHERE id = 1)"
 // of overwriting each other's whole state. Rows that change get the batch's
 // revision, the author's name and the server time.
 function toStatement(op, by, now) {
+  if (typeof op !== "object" || op === null || Array.isArray(op)) {
+    throw new HttpError(400, "Ungültige Operation")
+  }
   const ts = Number(op.ts)
   if (!Number.isFinite(ts) || ts <= 0) {
     throw new HttpError(400, "Ungültiger Zeitstempel")

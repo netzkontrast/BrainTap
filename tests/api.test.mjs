@@ -183,3 +183,33 @@ describe("revisions, authors and history", () => {
     assert.equal(res.status, 401)
   })
 })
+
+describe("robustness and sessions", () => {
+  test("a malformed cookie is a 401, not a 500", async () => {
+    const res = await state(new Request(base + "/api/state", { headers: { cookie: "bt_auth=%E0%A4%A" } }))
+    assert.equal(res.status, 401)
+  })
+
+  test("null or primitive ops are a 400, not a 500", async () => {
+    for (const ops of [[null], [42], ["x"]]) {
+      const res = await post(sync, "/api/sync", { ops })
+      assert.equal(res.status, 400, JSON.stringify(ops))
+    }
+  })
+
+  test("session tokens carry an expiry and expired ones are rejected", async () => {
+    const { sessionToken } = await import("../api/_lib.js")
+    const fresh = sessionToken()
+    assert.notEqual(fresh, sessionToken(Date.now() - 1000), "token depends on its expiry")
+    const expired = sessionToken(Date.now() - 1000)
+    const res = await state(new Request(base + "/api/state", { headers: { cookie: "bt_auth=" + expired } }))
+    assert.equal(res.status, 401)
+  })
+
+  test("a token with a tampered expiry is rejected", async () => {
+    const [, sig] = cookie.split("=")[1].split(".")
+    const forged = (Date.now() + 10 ** 12) + "." + sig
+    const res = await state(new Request(base + "/api/state", { headers: { cookie: "bt_auth=" + forged } }))
+    assert.equal(res.status, 401)
+  })
+})
