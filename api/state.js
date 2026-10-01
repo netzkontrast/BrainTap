@@ -10,15 +10,15 @@ export const GET = handle(async (request) => {
   const [items, answers, solutions, rev] = await c.batch(
     delta
       ? [
-          { sql: "SELECT collection, id, data, updated_at, deleted FROM items WHERE rev > ?", args: [since] },
-          { sql: "SELECT team_id, round_id, question, answer, points, updated_at FROM answers WHERE rev > ?", args: [since] },
-          { sql: "SELECT round_id, question, solution, updated_at FROM solutions WHERE rev > ?", args: [since] },
+          { sql: "SELECT collection, id, data, updated_at, deleted, rev FROM items WHERE rev > ?", args: [since] },
+          { sql: "SELECT team_id, round_id, question, answer, points, updated_at, rev FROM answers WHERE rev > ?", args: [since] },
+          { sql: "SELECT round_id, question, solution, updated_at, rev FROM solutions WHERE rev > ?", args: [since] },
           "SELECT v FROM sync_rev WHERE id = 1",
         ]
       : [
-          "SELECT collection, id, data, updated_at, deleted FROM items WHERE deleted = 0",
-          "SELECT team_id, round_id, question, answer, points, updated_at FROM answers",
-          "SELECT round_id, question, solution, updated_at FROM solutions",
+          "SELECT collection, id, data, updated_at, deleted, rev FROM items WHERE deleted = 0",
+          "SELECT team_id, round_id, question, answer, points, updated_at, rev FROM answers",
+          "SELECT round_id, question, solution, updated_at, rev FROM solutions",
           "SELECT v FROM sync_rev WHERE id = 1",
         ],
     "read",
@@ -34,6 +34,7 @@ export const GET = handle(async (request) => {
       data: Number(r.deleted) ? null : JSON.parse(r.data),
       deleted: Number(r.deleted) === 1,
       ts: Number(r.updated_at),
+      rev: Number(r.rev),
     })),
     answers: answers.rows.map((r) => ({
       team_id: r.team_id,
@@ -42,12 +43,14 @@ export const GET = handle(async (request) => {
       answer: r.answer,
       points: r.points == null ? null : Number(r.points),
       ts: Number(r.updated_at),
+      rev: Number(r.rev),
     })),
     solutions: solutions.rows.map((r) => ({
       round_id: r.round_id,
       question: Number(r.question),
       solution: r.solution,
       ts: Number(r.updated_at),
+      rev: Number(r.rev),
     })),
   })
 })

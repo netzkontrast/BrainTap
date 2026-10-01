@@ -11,7 +11,7 @@ export const GET = handle(async (request) => {
 
   if (view === "trash") {
     const r = await c.execute({
-      sql: `SELECT collection, id, data, changed_by, changed_at FROM items
+      sql: `SELECT collection, id, data, changed_by, changed_at, rev FROM items
             WHERE deleted = 1 AND data IS NOT NULL AND data != 'null' AND collection != 'scores'
             ORDER BY changed_at DESC LIMIT ?`,
       args: [limit],
@@ -23,6 +23,7 @@ export const GET = handle(async (request) => {
         data: JSON.parse(x.data),
         by: x.changed_by,
         at: x.changed_at == null ? null : Number(x.changed_at),
+        rev: Number(x.rev),
       })),
     })
   }

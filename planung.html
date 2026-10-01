@@ -135,6 +135,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
 .show-timer div.low { background: #e2a64a; }
 #showTime { font-variant-numeric: tabular-nums; font-size: 4vh; color: #f3eee2; font-weight: 700; }
 .show-help { align-self: flex-end; }
+.notice { background: var(--surface-2); border-left: 4px solid var(--warn); padding: 8px 12px; border-radius: 0 6px 6px 0; margin: 0 0 12px; font-size: .9rem; }
 .sync { margin: 6px 0 0; font-size: .8rem; color: var(--muted); }
 .sync.ok { color: var(--ok); }
 .sync.warn { color: var(--warn); font-weight: 600; }
@@ -142,6 +143,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
 .overlay[hidden] { display: none; }
 .login { width: 100%; max-width: 360px; margin: 0; }
 .login input[type="password"], .login input[type="text"] { width: 100%; margin: 4px 0 8px; }
+input.derived { background: var(--surface-2); color: var(--muted); }
 input.inline, textarea.inline { border-color: transparent; background: transparent; padding: 2px 4px; width: 100%; }
 textarea.inline { resize: none; overflow: hidden; line-height: 1.4; min-height: 0; display: block; }
 ul.check li { flex-wrap: wrap; }
@@ -211,6 +213,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     </div>
     <div class="countdown"><strong id="daysLeft">–</strong><span>Tage bis zum Quiz</span><p id="syncState" class="sync" role="status" aria-live="polite">Verbinde …</p></div>
   </header>
+  <p id="notice" class="notice" role="alert" hidden></p>
 
   <div class="chips" aria-label="Rahmenentscheidungen">
     <span class="chip">Hybrid mit Razzia</span>
@@ -633,7 +636,9 @@ input.due { font-size: .8rem; padding: 2px 4px; }
 
   /* ---------- Model, local cache and outbox ---------- */
   // model.items[collection][id] = data; answers/solutions are keyed rows.
-  var model = { items: {}, answers: {}, solutions: {} };
+  // revs[opKey] = server revision of the row as this browser last saw it;
+  // every write sends it as `base` so the server can detect concurrent edits.
+  var model = { items: {}, answers: {}, solutions: {}, revs: {} };
   var outbox = [];
   var state = null;
   var lastTs = 0;
@@ -664,7 +669,8 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   function clone(x) { return x == null ? x : JSON.parse(JSON.stringify(x)); }
 
   function enqueue(op, collection, id, data) {
-    var entry = { key: opKey(collection, id), op: op, collection: collection, id: id, data: clone(data), ts: nextTs() };
+    var key = opKey(collection, id);
+    var entry = { key: key, op: op, collection: collection, id: id, data: clone(data), ts: nextTs(), base: (model.revs || {})[key] || 0 };
     if (op !== "seed") outbox = outbox.filter(function (o) { return o.key !== entry.key; });
     outbox.push(entry);
     persistLocal();
@@ -752,11 +758,13 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     flushing = true;
     var batch = outbox.slice(0, 500);
     updateSyncState();
-    api("api/sync", { method: "POST", body: JSON.stringify({ by: myName() || null, ops: batch.map(function (o) { return { op: o.op, collection: o.collection, id: o.id, data: o.data, ts: o.ts }; }) }) })
+    api("api/sync", { method: "POST", body: JSON.stringify({ by: myName() || null, ops: batch.map(function (o) { return { op: o.op, collection: o.collection, id: o.id, data: o.data, ts: o.ts, base: o.op === "seed" ? undefined : o.base }; }) }) })
       .then(handleStatus)
-      .then(function () {
+      .then(function (res) {
         var sent = {}; batch.forEach(function (o) { sent[o.key + "@" + o.ts] = true; });
         outbox = outbox.filter(function (o) { return !sent[o.key + "@" + o.ts]; });
+        applyResults(batch, res.results || []);
+        noteMigrationAcks(batch);
         flushSeq++; retryDelay = 2000; persistLocal();
         flushing = false;
         if (outbox.length) flush(); else { updateSyncState(); scheduleHistory(); }
@@ -767,6 +775,46 @@ input.due { font-size: .8rem; padding: 2px 4px; }
         online = false; updateSyncState();
         scheduleFlush(retryDelay); retryDelay = Math.min(retryDelay * 2, 30000);
       });
+  }
+
+  // Applied writes move the row's revision forward, also for edits queued
+  // meanwhile. Rejected writes lost against someone else's newer change: the
+  // server row replaces ours, queued edits of that row are dropped, and the
+  // person is told which entry was overwritten.
+  function applyResults(batch, results) {
+    var lost = [];
+    results.forEach(function (r, i) {
+      var op = batch[i]; if (!op) return;
+      var key = op.key;
+      if (r.status === "rejected") {
+        outbox = outbox.filter(function (o) { return o.key !== key || o.op === "seed"; });
+        applyServerRow(op.collection, op.id, r.row);
+        lost.push(op);
+      } else {
+        model.revs[key] = r.rev;
+        outbox.forEach(function (o) { if (o.key === key) o.base = r.rev; });
+      }
+    });
+    persistLocal();
+    if (lost.length) {
+      rebuild(); renderKeepingFocus();
+      var names = lost.map(function (o) { return (LABEL[o.collection] || o.collection) + " „" + describe({ collection: o.collection, id: o.id, data: o.data }) + "“"; });
+      showNotice("Gleichzeitig von jemand anderem geändert, deren Fassung gilt: " + names.slice(0, 3).join(", ") + (names.length > 3 ? " und " + (names.length - 3) + " weitere" : ""));
+    }
+  }
+  function applyServerRow(collection, id, row) {
+    var key = opKey(collection, id);
+    if (!row) { delete bucket(collection)[id]; delete model.revs[key]; return; }
+    model.revs[key] = row.rev;
+    if (collection === "answers") model.answers[id] = { team_id: row.team_id, round_id: row.round_id, question: row.question, answer: row.answer, points: row.points };
+    else if (collection === "solutions") model.solutions[id] = { round_id: row.round_id, question: row.question, solution: row.solution };
+    else if (row.deleted) delete bucket(collection)[id];
+    else bucket(collection)[id] = row.data;
+  }
+  var noticeTimer = null;
+  function showNotice(text) {
+    var n = byId("notice"); n.textContent = text; n.hidden = false;
+    clearTimeout(noticeTimer); noticeTimer = setTimeout(function () { n.hidden = true; }, 12000);
   }
 
   var pulling = false, pendingRender = false, lastSnapshot = "", lastInputAt = 0;
@@ -811,10 +859,10 @@ input.due { font-size: .8rem; padding: 2px 4px; }
       if (outbox.length) scheduleFlush(0); else updateSyncState();
       if (data.delta) return applyDelta(data);
 
-      var server = { items: {}, answers: {}, solutions: {}, rev: data.rev };
-      data.items.forEach(function (r) { (server.items[r.collection] = server.items[r.collection] || {})[r.id] = r.data; });
-      data.answers.forEach(function (r) { server.answers[answerId(r.team_id, r.round_id, r.question)] = { team_id: r.team_id, round_id: r.round_id, question: r.question, answer: r.answer, points: r.points }; });
-      data.solutions.forEach(function (r) { server.solutions[solutionId(r.round_id, r.question)] = { round_id: r.round_id, question: r.question, solution: r.solution }; });
+      var server = { items: {}, answers: {}, solutions: {}, rev: data.rev, revs: {} };
+      data.items.forEach(function (r) { (server.items[r.collection] = server.items[r.collection] || {})[r.id] = r.data; server.revs[opKey(r.collection, r.id)] = r.rev; });
+      data.answers.forEach(function (r) { var id = answerId(r.team_id, r.round_id, r.question); server.answers[id] = { team_id: r.team_id, round_id: r.round_id, question: r.question, answer: r.answer, points: r.points }; server.revs[opKey("answers", id)] = r.rev; });
+      data.solutions.forEach(function (r) { var id = solutionId(r.round_id, r.question); server.solutions[id] = { round_id: r.round_id, question: r.question, solution: r.solution }; server.revs[opKey("solutions", id)] = r.rev; });
 
       if (!data.items.length) {
         // Empty server: seed it from this browser's earlier local data or the
@@ -822,8 +870,8 @@ input.due { font-size: .8rem; padding: 2px 4px; }
         var legacy = readStorage(LEGACY_KEY);
         model = server;
         outbox.forEach(function (o) { applyOp(model, o); });
+        model.revs = model.revs || {};
         applyAndQueue(stateToOps(legacy || TEMPLATE, "seed"));
-        try { localStorage.removeItem(LEGACY_KEY); } catch (e) { /* ignore */ }
         rebuild(); renderAll(); persistLocal();
         return;
       }
@@ -843,17 +891,24 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     // fetched again once they pause.
     if (editing()) { pendingRender = true; setTimeout(pull, 4000); return; }
     data.items.forEach(function (r) {
+      // Rows with a queued local edit keep their old revision, so the server
+      // sees the conflict and answers with its row when the edit is sent.
       if (hasPending(r.collection, r.id)) return;
       var b = model.items[r.collection] = model.items[r.collection] || {};
       if (r.deleted) delete b[r.id]; else b[r.id] = r.data;
+      model.revs[opKey(r.collection, r.id)] = r.rev;
     });
     data.answers.forEach(function (r) {
       var id = answerId(r.team_id, r.round_id, r.question);
-      if (!hasPending("answers", id)) model.answers[id] = { team_id: r.team_id, round_id: r.round_id, question: r.question, answer: r.answer, points: r.points };
+      if (hasPending("answers", id)) return;
+      model.answers[id] = { team_id: r.team_id, round_id: r.round_id, question: r.question, answer: r.answer, points: r.points };
+      model.revs[opKey("answers", id)] = r.rev;
     });
     data.solutions.forEach(function (r) {
       var id = solutionId(r.round_id, r.question);
-      if (!hasPending("solutions", id)) model.solutions[id] = { round_id: r.round_id, question: r.question, solution: r.solution };
+      if (hasPending("solutions", id)) return;
+      model.solutions[id] = { round_id: r.round_id, question: r.question, solution: r.solution };
+      model.revs[opKey("solutions", id)] = r.rev;
     });
     model.rev = data.rev;
     persistLocal(); rebuild(); renderKeepingFocus(); scheduleHistory();
@@ -893,7 +948,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
         if (res.status === 503) throw new Error("Server noch nicht eingerichtet (ORGA_PASSWORD fehlt)");
         if (!res.ok) throw new Error("Fehler " + res.status);
         auth = "ok"; byId("loginPw").value = ""; byId("login").hidden = true;
-        return pull().then(flush).then(loadHistory);
+        return pull().then(flush).then(loadHistory).then(migrateLegacyAnswers);
       })
       .catch(function (err) { byId("loginErr").textContent = err.message === "Failed to fetch" ? "Keine Verbindung zum Server" : err.message; });
   });
@@ -910,7 +965,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
       if (k === "text") n.textContent = attrs[k];
       else if (k.slice(0, 2) === "on") n.addEventListener(k.slice(2), attrs[k]);
       else if (k === "checked" || k === "value" || k === "selected") n[k] = attrs[k];
-      else n.setAttribute(k, attrs[k]);
+      else if (attrs[k] != null) n.setAttribute(k, attrs[k]);
     });
     (children || []).forEach(function (c) { if (c != null) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
     return n;
@@ -1189,7 +1244,22 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     rebuild(); renderTeams(); renderScores(); renderAnswerSelectors();
   }
 
-  function score(teamId, roundId) { var s = state.scores[teamId]; return s && s[roundId] != null && s[roundId] !== "" ? Number(s[roundId]) : null; }
+  // A round with scored answers takes its total from the merged answers, so
+  // two organisers scoring different questions can never store a wrong sum.
+  // Manual scores (e.g. converted Razzia points) apply only without answers.
+  function answerTotal(teamId, roundId) {
+    var n = 0, sum = 0;
+    Object.keys(model.answers).forEach(function (k) {
+      var a = model.answers[k];
+      if (a.team_id === teamId && a.round_id === roundId && a.points != null) { n++; sum += Number(a.points); }
+    });
+    return n ? sum : null;
+  }
+  function score(teamId, roundId) {
+    var fromAnswers = answerTotal(teamId, roundId);
+    if (fromAnswers != null) return fromAnswers;
+    var s = state.scores[teamId]; return s && s[roundId] != null && s[roundId] !== "" ? Number(s[roundId]) : null;
+  }
   function totals(upToIndex) {
     var rounds = state.rounds.slice(0, upToIndex == null ? state.rounds.length : upToIndex + 1);
     var all = state.teams.map(function (t) {
@@ -1213,8 +1283,9 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     var tb = el("tbody", { id: "scoreBody" });
     state.teams.forEach(function (t) {
       tb.appendChild(el("tr", { "data-team": t.id }, [el("td", null, [t.name])].concat(state.rounds.map(function (r) {
-        var v = score(t.id, r.id);
-        return el("td", { class: "num" }, [el("input", { type: "number", step: "0.5", value: v == null ? "" : v, "data-score": t.id + ":" + r.id, "aria-label": t.name + " " + r.name, oninput: function (e) {
+        var v = score(t.id, r.id), derived = answerTotal(t.id, r.id) != null;
+        return el("td", { class: "num" }, [el("input", { type: "number", step: "0.5", value: v == null ? "" : v, "data-score": t.id + ":" + r.id, "aria-label": t.name + " " + r.name,
+          readonly: derived ? "" : null, title: derived ? "Summe aus den erfassten Antworten" : "Punkte von Hand", class: derived ? "derived" : "", oninput: function (e) {
           setScore(t.id, r.id, e.target.value === "" ? null : Number(e.target.value));
           renderDerived();
         } })]);
@@ -1243,11 +1314,9 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     return out;
   }
   function syncRoundScore(teamId, roundId) {
-    var ans = answersFor(teamId, roundId), n = 0, sum = 0;
-    Object.keys(ans).forEach(function (k) { if (ans[k].points != null) { n++; sum += Number(ans[k].points); } });
-    if (!n) return;
-    setScore(teamId, roundId, sum);
-    var inp = document.querySelector('[data-score="' + teamId + ":" + roundId + '"]'); if (inp) inp.value = sum;
+    var v = score(teamId, roundId);
+    var inp = document.querySelector('[data-score="' + teamId + ":" + roundId + '"]');
+    if (inp) { inp.value = v == null ? "" : v; inp.readOnly = answerTotal(teamId, roundId) != null; inp.classList.toggle("derived", inp.readOnly); }
     renderDerived();
   }
   function renderAnswerSelectors() {
@@ -1311,7 +1380,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     }
     updateSum();
     byId("ansAllCorrect").disabled = isSol;
-    byId("estimateBar").hidden = !questionsOf(round.id).some(function (q) { return q.estimate; });
+    byId("estimateBar").hidden = !slotQuestions(round).some(function (q) { return q && q.estimate; });
     byId("estimateMsg").textContent = "";
     byId("ansAllCorrect").onclick = function () {
       for (var k = 1; k <= round.questions; k++) if (!ans[k] || ans[k].points == null) upsertAnswer(k, "points", 0);
@@ -1389,8 +1458,19 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     return n > 0 && questionsOf(r.id).filter(function (q) { return q.status === "fertig"; }).length >= n;
   }
   function correctOption(q) { return q.options && q.options[q.correct] ? q.options[q.correct] : ""; }
+  // The one question numbering used everywhere: slot n of a round is the
+  // n-th question in the bank, for n = 1..planned count. Answer sheets, the
+  // answer grid, solutions, estimate scoring, the projector and the Razzia
+  // export all use these slots; questions beyond them are reserves until
+  // someone moves them up.
+  function slotQuestions(round) {
+    var qs = questionsOf(round.id), out = [];
+    for (var i = 0; i < (Number(round.questions) || 0); i++) out.push(qs[i] || null);
+    return out;
+  }
   function bankSolution(roundId, n) {
-    var q = questionsOf(roundId)[n - 1];
+    var round = state.rounds.find(function (r) { return r.id === roundId; });
+    var q = round ? slotQuestions(round)[n - 1] : null;
     return q ? q.solution || correctOption(q) : "";
   }
   function renderQuestionRounds() {
@@ -1493,11 +1573,12 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     return "image";
   }
   function razziaQuiz(round) {
-    var skipped = [], questions = [];
+    var skipped = [], missing = [], questions = [];
     var cooldown = Math.min(15, Math.max(3, Math.round(Number(state.meta.razziaCooldown) || 5)));
     var time = Math.min(120, Math.max(5, Math.round(Number(round.secs) || 20)));
     var penalty = Math.max(0, Math.round(Number(state.meta.razziaPenalty) || 0));
-    questionsOf(round.id).forEach(function (q, i) {
+    slotQuestions(round).forEach(function (q, i) {
+      if (!q) { missing.push(i + 1); return; }
       var opts = (q.options || []).map(function (o, k) { return { text: (o || "").trim(), k: k }; }).filter(function (o) { return o.text; });
       var correct = opts.findIndex(function (o) { return o.k === q.correct; });
       if (!q.mc || !(q.text || "").trim() || opts.length < 2 || correct < 0) { skipped.push(i + 1); return; }
@@ -1507,7 +1588,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
       if (/^https?:\/\//.test(url) || url.indexOf("/media/") === 0) item.media = { type: mediaType(url), url: url };
       questions.push(item);
     });
-    return { quiz: { gameMode: "quiz", subject: "BrainTap – " + round.name, questions: questions }, skipped: skipped };
+    return { quiz: { gameMode: "quiz", subject: "BrainTap – " + round.name, questions: questions }, skipped: skipped, missing: missing };
   }
   byId("exportRazzia").addEventListener("click", function () {
     var round = state.rounds.find(function (r) { return r.id === byId("qRound").value; });
@@ -1517,7 +1598,9 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     if (!res.quiz.questions.length) { msg.textContent = "Keine exportierbaren Fragen: Razzia braucht Multiple-Choice-Fragen mit Fragetext, mindestens 2 Optionen und markierter richtiger Antwort."; return; }
     var slug = round.name.toLowerCase().replace(/[^a-z0-9äöüß]+/g, "-").replace(/^-|-$/g, "");
     download(new Blob([JSON.stringify(res.quiz, null, 2)], { type: "application/json" }), "braintap-" + slug + ".json");
-    msg.textContent = res.quiz.questions.length + " Fragen exportiert" + (res.skipped.length ? ". Übersprungen (unvollständig): Frage " + res.skipped.join(", ") : ".");
+    msg.textContent = res.quiz.questions.length + " Fragen exportiert" +
+      (res.skipped.length ? " · unvollständig, übersprungen: Frage " + res.skipped.join(", ") : "") +
+      (res.missing.length ? " · noch nicht angelegt: Frage " + res.missing.join(", ") : "") + ".";
   });
 
   /* ---------- Print views ---------- */
@@ -1558,7 +1641,8 @@ input.due { font-size: .8rem; padding: 2px 4px; }
       var qs = questionsOf(r.id);
       var cards = qs.map(function (q, k) {
         var mc = q.mc && q.options ? '<div class="mc">' + q.options.map(function (o, j) { return o ? "ABCD"[j] + ") " + esc(o) + (j === q.correct ? " ✓" : "") : ""; }).filter(Boolean).join(" · ") + "</div>" : "";
-        return '<div class="card"><b>' + (k + 1) + '. ' + esc(q.text || "(ohne Text)") + '</b>' + mc +
+        var reserve = k >= (Number(r.questions) || 0);
+        return '<div class="card"><b>' + (reserve ? "Reserve: " : (k + 1) + '. ') + esc(q.text || "(ohne Text)") + '</b>' + mc +
           '<div class="sol">Lösung: <b>' + esc(q.solution || correctOption(q) || "–") + '</b></div>' +
           (q.media ? '<div class="note">Medien: ' + esc(q.media) + '</div>' : "") +
           (q.notes ? '<div class="note">Notiz: ' + esc(q.notes) + '</div>' : "") + '</div>';
@@ -1620,9 +1704,9 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   byId("scoreEstimates").addEventListener("click", function () {
     var round = selectedRound(); if (!round) return;
     var places = [Number(state.meta.estP1) || 0, Number(state.meta.estP2) || 0, Number(state.meta.estP3) || 0];
-    var qs = questionsOf(round.id), touched = {}, scored = 0, missing = [];
+    var qs = slotQuestions(round), touched = {}, scored = 0, missing = [];
     qs.forEach(function (q, i) {
-      if (!q.estimate) return;
+      if (!q || !q.estimate) return;
       var n = i + 1;
       var override = model.solutions[solutionId(round.id, n)];
       var target = parseNumber(override && override.solution ? override.solution : q.solution);
@@ -1666,7 +1750,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   }
   function startPresentation(reveal) {
     var round = state.rounds.find(function (r) { return r.id === byId("qRound").value; }); if (!round) return;
-    var qs = questionsOf(round.id).filter(function (q) { return (q.text || "").trim(); });
+    var qs = slotQuestions(round).map(function (q) { return q && (q.text || "").trim() ? q : { text: "(Frage fehlt noch in der Fragen-Bank)", missing: true }; });
     var idx = state.rounds.indexOf(round) + 1;
     show.round = round; show.reveal = reveal; show.i = 0;
     show.slides = [{ kind: "title", title: "Runde " + idx + ": " + round.name, sub: reveal ? "Auflösung" : (round.mode + " · " + (Number(round.secs) || 0) + " Sekunden pro Frage") }]
@@ -1789,6 +1873,69 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   }
   byId("refreshHistory").addEventListener("click", loadHistory);
   byId("myName").addEventListener("change", function (e) { setMyName(e.target.value); e.target.value = myName(); });
+
+
+  /* ---------- One-time takeover of the old browser-only answer database ---------- */
+  // Before server storage, answers lived as SQLite bytes in IndexedDB
+  // braintap/files/answers.sqlite. They are sent as seeds (never overwriting
+  // newer server rows) and the takeover only counts as done once the server
+  // has acknowledged every one of them.
+  var IDB_DONE_KEY = "braintap-idb-migrated";
+  var idbPending = null;
+  function readLegacyAnswerDb() {
+    return new Promise(function (resolve) {
+      if (!window.indexedDB) return resolve(null);
+      var req;
+      try { req = indexedDB.open("braintap"); } catch (e) { return resolve(null); }
+      // No old database: abort the upgrade so we don't create an empty one.
+      req.onupgradeneeded = function () { req.transaction.abort(); };
+      req.onerror = function () { resolve(null); };
+      req.onsuccess = function () {
+        var dbh = req.result;
+        if (!dbh.objectStoreNames.contains("files")) { dbh.close(); return resolve(null); }
+        var get = dbh.transaction("files", "readonly").objectStore("files").get("answers.sqlite");
+        get.onsuccess = function () { dbh.close(); resolve(get.result || null); };
+        get.onerror = function () { dbh.close(); resolve(null); };
+      };
+    });
+  }
+  function migrateLegacyAnswers() {
+    try { if (localStorage.getItem(IDB_DONE_KEY)) return Promise.resolve(); } catch (e) { return Promise.resolve(); }
+    if (auth !== "ok") return Promise.resolve();
+    return readLegacyAnswerDb().then(function (bytes) {
+      if (!bytes) { try { localStorage.setItem(IDB_DONE_KEY, "none"); } catch (e) { /* ignore */ } return; }
+      return loadSql().then(function (SQL) {
+        var d = new SQL.Database(new Uint8Array(bytes));
+        var rows = function (sql) { try { var r = d.exec(sql)[0]; return r ? r.values : []; } catch (e) { return []; } };
+        var byName = function (list, id, name) {
+          if (list.some(function (x) { return x.id === id; })) return id;
+          var hit = name && list.find(function (x) { return x.name === name; });
+          return hit ? hit.id : id;
+        };
+        var ops = [];
+        rows("SELECT team_id, team_name, round_id, round_name, question, answer, points FROM answers").forEach(function (x) {
+          var team = byName(state.teams, x[0], x[1]), round = byName(state.rounds, x[2], x[3]);
+          ops.push({ op: "seed", collection: "answers", id: answerId(team, round, x[4]), data: { team_id: team, round_id: round, question: x[4], answer: x[5], points: x[6] } });
+        });
+        rows("SELECT round_id, question, solution FROM solutions").forEach(function (x) {
+          ops.push({ op: "seed", collection: "solutions", id: solutionId(x[0], x[1]), data: { round_id: x[0], question: x[1], solution: x[2] } });
+        });
+        d.close();
+        if (!ops.length) { try { localStorage.setItem(IDB_DONE_KEY, "empty"); } catch (e) { /* ignore */ } return; }
+        idbPending = { keys: {}, total: ops.length };
+        ops.forEach(function (o) { idbPending.keys[opKey(o.collection, o.id)] = true; });
+        applyAndQueue(ops); rebuild(); renderAll();
+      });
+    }).catch(function () { /* keep the old data; try again next start */ });
+  }
+  function noteMigrationAcks(batch) {
+    if (!idbPending) return;
+    batch.forEach(function (o) { if (o.op === "seed") delete idbPending.keys[o.key]; });
+    if (Object.keys(idbPending.keys).length) return;
+    try { localStorage.setItem(IDB_DONE_KEY, new Date().toISOString()); } catch (e) { /* ignore */ }
+    showNotice(idbPending.total + " Antworten und Lösungen aus der alten Browser-Datenbank übernommen (vorhandene neuere Einträge blieben unverändert).");
+    idbPending = null;
+  }
 
   /* ---------- Derived values (no input re-render, keeps focus) ---------- */
   function renderDerived() {
@@ -1914,7 +2061,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   outbox = readStorage(OUTBOX_KEY) || [];
   outbox.forEach(function (o) { lastTs = Math.max(lastTs, o.ts); });
   if (cached && cached.items) {
-    model = { items: cached.items, answers: cached.answers || {}, solutions: cached.solutions || {}, rev: cached.rev || 0 };
+    model = { items: cached.items, answers: cached.answers || {}, solutions: cached.solutions || {}, rev: cached.rev || 0, revs: cached.revs || {} };
   } else {
     // Nothing cached yet: show the template right away; the first pull replaces
     // it with the server state, or seeds an empty server with it.
@@ -1925,7 +2072,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   updateSyncState();
   try { var tab = localStorage.getItem(TAB_KEY); if (tab && byId("panel-" + tab)) showTab(tab); } catch (e) { /* ignore */ }
   byId("myName").value = myName();
-  pull().then(flush).then(loadHistory);
+  pull().then(flush).then(loadHistory).then(migrateLegacyAnswers);
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () { /* offline reload unavailable */ });
 })();
 </script>
