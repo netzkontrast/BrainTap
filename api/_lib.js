@@ -37,6 +37,16 @@ export function db() {
   return ready.then(() => client)
 }
 
+// Columns added after the first release. Each sync batch bumps sync_rev once
+// and stamps every row it actually changes, so clients can ask for
+// "everything after revision N" instead of the whole state.
+const TRACKING_COLUMNS = [
+  ["rev", "INTEGER NOT NULL DEFAULT 0"],
+  ["changed_by", "TEXT"],
+  ["changed_at", "INTEGER"],
+]
+export const TABLES = ["items", "answers", "solutions"]
+
 async function migrate(c) {
   await c.batch(
     [
@@ -61,9 +71,34 @@ async function migrate(c) {
         solution TEXT,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (round_id, question))`,
+      `CREATE TABLE IF NOT EXISTS sync_rev (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        v INTEGER NOT NULL)`,
+      "INSERT OR IGNORE INTO sync_rev (id, v) VALUES (1, 0)",
     ],
     "write",
   )
+
+  const alters = []
+  for (const table of TABLES) {
+    const info = await c.execute(`PRAGMA table_info(${table})`)
+    const have = new Set(info.rows.map((r) => r.name))
+    for (const [name, type] of TRACKING_COLUMNS) {
+      if (!have.has(name)) alters.push(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`)
+    }
+  }
+  alters.push(
+    "CREATE INDEX IF NOT EXISTS items_rev ON items (rev)",
+    "CREATE INDEX IF NOT EXISTS answers_rev ON answers (rev)",
+    "CREATE INDEX IF NOT EXISTS solutions_rev ON solutions (rev)",
+    "CREATE INDEX IF NOT EXISTS items_changed ON items (changed_at)",
+  )
+  await c.batch(alters, "write")
+}
+
+export async function currentRev(c) {
+  const r = await c.execute("SELECT v FROM sync_rev WHERE id = 1")
+  return Number(r.rows[0]?.v ?? 0)
 }
 
 export class HttpError extends Error {

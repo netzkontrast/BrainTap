@@ -141,7 +141,28 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
 .overlay { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .overlay[hidden] { display: none; }
 .login { width: 100%; max-width: 360px; margin: 0; }
-.login input[type="password"] { width: 100%; margin: 4px 0 8px; }
+.login input[type="password"], .login input[type="text"] { width: 100%; margin: 4px 0 8px; }
+input.inline, textarea.inline { border-color: transparent; background: transparent; padding: 2px 4px; width: 100%; }
+textarea.inline { resize: none; overflow: hidden; line-height: 1.4; min-height: 0; display: block; }
+ul.check li { flex-wrap: wrap; }
+ul.check li > textarea.txt { flex: 1 1 240px; min-width: 0; }
+ul.check li > .meta { margin-left: auto; }
+@media (max-width: 600px) {
+  ul.check li > textarea.txt { flex: 1 1 0; }
+  ul.check li > .meta { width: 100%; padding-left: 28px; justify-content: flex-end; }
+  ul.check li > .meta select { flex: 1; min-width: 0; }
+}
+input.inline:hover, textarea.inline:hover { border-color: var(--border); }
+input.inline:focus, textarea.inline:focus { border-color: var(--focus); background: var(--surface); }
+li.done textarea.inline, li.done input.inline { color: var(--muted); text-decoration: line-through; }
+input.due { font-size: .8rem; padding: 2px 4px; }
+.txtcol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.feed { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.feed li { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: .88rem; }
+.feed li:last-child { border-bottom: 0; }
+.feed .who { font-weight: 600; white-space: nowrap; }
+.feed .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed .when { color: var(--muted); font-size: .78rem; white-space: nowrap; }
 .err { color: var(--warn); min-height: 1.2em; margin: 0 0 8px; }
 .qlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .q { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--surface); }
@@ -227,6 +248,24 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       <h2>Offene Entscheidungen</h2>
       <p class="muted small">Die Technik der Kneipe ist noch offen. Diese Punkte entscheiden, ob Variante A (Hybrid) oder Variante B (analog) läuft.</p>
       <ul class="check" id="decisionList"></ul>
+      <div class="row noprint" style="margin-top:10px">
+        <input type="text" id="newDecision" placeholder="Neue Entscheidung" style="flex:1;min-width:180px">
+        <button class="btn" id="addDecision">Hinzufügen</button>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h2>Letzte Änderungen</h2>
+        <p class="muted small">Wer im Orga-Team zuletzt was geändert hat. Pro Eintrag wird die jeweils letzte Änderung angezeigt.</p>
+        <ul class="feed" id="activityList"><li class="muted small">Wird geladen …</li></ul>
+        <div class="row noprint" style="margin-top:8px"><button class="btn" id="refreshHistory">Aktualisieren</button></div>
+      </div>
+      <div class="card">
+        <h2>Papierkorb</h2>
+        <p class="muted small">Gelöschte Aufgaben, Fragen, Teams usw. lassen sich hier wiederherstellen.</p>
+        <ul class="feed" id="trashList"><li class="muted small">Wird geladen …</li></ul>
+      </div>
     </div>
 
     <div class="card">
@@ -271,7 +310,13 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   <section class="panel" id="panel-tasks" role="tabpanel">
     <div class="card">
       <h2>Zeitplan bis zum 3. November</h2>
-      <p class="muted small">Abhaken, Verantwortliche zuweisen, eigene Aufgaben ergänzen. Überfällige offene Aufgaben sind markiert.</p>
+      <p class="muted small">Abhaken, Verantwortliche zuweisen, Text und Datum direkt bearbeiten, eigene Aufgaben ergänzen. Überfällige offene Aufgaben sind markiert.</p>
+      <div class="row noprint small" style="margin-bottom:8px">
+        <label>Zuständig <select id="taskOwnerFilter"></select></label>
+        <label><input type="checkbox" id="taskOpenOnly"> nur offene</label>
+        <span class="muted" id="taskFilterInfo"></span>
+        <button class="btn" id="exportIcs" style="margin-left:auto">Termine als Kalender (.ics)</button>
+      </div>
       <div id="taskWeeks"></div>
       <div class="row noprint" style="margin-top:12px">
         <input type="text" id="newTaskText" placeholder="Neue Aufgabe" style="flex:1;min-width:180px">
@@ -451,6 +496,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       <label class="btn" style="display:inline-block">Import (JSON)<input type="file" id="importFile" accept="application/json" hidden></label>
       <button class="btn" id="printBtn">Drucken</button>
       <button class="btn" id="logoutBtn">Abmelden</button>
+      <label class="small">Ich bin <input type="text" id="myName" maxlength="40" style="width:10em"></label>
     </div>
   </div>
 
@@ -468,6 +514,8 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   <form class="card login" id="loginForm">
     <h2>Anmelden</h2>
     <p class="muted small">Gemeinsames Passwort des Orga-Teams. Danach werden alle Änderungen auf dem Server gespeichert.</p>
+    <label class="small" for="loginName">Dein Name (für „Letzte Änderungen“)</label>
+    <input type="text" id="loginName" autocomplete="nickname" maxlength="40" required>
     <label class="small" for="loginPw">Passwort</label>
     <input type="password" id="loginPw" autocomplete="current-password" required>
     <p class="small err" id="loginErr" role="alert"></p>
@@ -491,6 +539,10 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   var OUTBOX_KEY = "braintap-outbox-v2";
   var LEGACY_KEY = "braintap-planung-v1";
   var TAB_KEY = "braintap-tab";
+  var NAME_KEY = "braintap-name";
+  var FILTER_KEY = "braintap-taskfilter";
+  function myName() { try { return localStorage.getItem(NAME_KEY) || ""; } catch (e) { return ""; } }
+  function setMyName(n) { try { localStorage.setItem(NAME_KEY, n.trim().slice(0, 40)); } catch (e) { /* ignore */ } }
   var EVENT_DATE = new Date(2026, 10, 3);
   var ARRAY_COLLECTIONS = ["roles", "decisions", "tasks", "rounds", "tech", "teams", "questions", "expenses"];
   var uid = function () { return Math.random().toString(36).slice(2, 10); };
@@ -700,14 +752,14 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     flushing = true;
     var batch = outbox.slice(0, 500);
     updateSyncState();
-    api("api/sync", { method: "POST", body: JSON.stringify({ ops: batch.map(function (o) { return { op: o.op, collection: o.collection, id: o.id, data: o.data, ts: o.ts }; }) }) })
+    api("api/sync", { method: "POST", body: JSON.stringify({ by: myName() || null, ops: batch.map(function (o) { return { op: o.op, collection: o.collection, id: o.id, data: o.data, ts: o.ts }; }) }) })
       .then(handleStatus)
       .then(function () {
         var sent = {}; batch.forEach(function (o) { sent[o.key + "@" + o.ts] = true; });
         outbox = outbox.filter(function (o) { return !sent[o.key + "@" + o.ts]; });
         flushSeq++; retryDelay = 2000; persistLocal();
         flushing = false;
-        if (outbox.length) flush(); else updateSyncState();
+        if (outbox.length) flush(); else { updateSyncState(); scheduleHistory(); }
       })
       .catch(function (err) {
         flushing = false;
@@ -741,16 +793,25 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       try { if (caret != null) again.setSelectionRange(caret, caret); } catch (e) { /* not a text field */ }
     }
   }
+  function hasPending(collection, id) {
+    var key = opKey(collection, id);
+    return outbox.some(function (o) { return o.key === key; });
+  }
+  // First load (or no revision yet) fetches everything; afterwards only rows
+  // changed since the last revision we saw, deletions included.
   function pull() {
     if (pulling || auth === "unconfigured") return Promise.resolve();
     pulling = true;
-    var seqAtStart = flushSeq;
-    return api("api/state", { method: "GET" }).then(handleStatus).then(function (data) {
+    var seqAtStart = flushSeq, since = model.rev || 0;
+    return api(since ? "api/state?since=" + since : "api/state", { method: "GET" }).then(handleStatus).then(function (data) {
       pulling = false;
       // A flush finished while this request was in flight, so the response
       // may predate our own writes. Ask again rather than show stale rows.
       if (flushSeq !== seqAtStart) { setTimeout(pull, 200); return; }
-      var server = { items: {}, answers: {}, solutions: {} };
+      if (outbox.length) scheduleFlush(0); else updateSyncState();
+      if (data.delta) return applyDelta(data);
+
+      var server = { items: {}, answers: {}, solutions: {}, rev: data.rev };
       data.items.forEach(function (r) { (server.items[r.collection] = server.items[r.collection] || {})[r.id] = r.data; });
       data.answers.forEach(function (r) { server.answers[answerId(r.team_id, r.round_id, r.question)] = { team_id: r.team_id, round_id: r.round_id, question: r.question, answer: r.answer, points: r.points }; });
       data.solutions.forEach(function (r) { server.solutions[solutionId(r.round_id, r.question)] = { round_id: r.round_id, question: r.question, solution: r.solution }; });
@@ -768,16 +829,34 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       }
 
       outbox.forEach(function (o) { applyOp(server, o); });
-      var snapshot = JSON.stringify(server);
-      if (outbox.length) scheduleFlush(0); else updateSyncState();
-      if (snapshot === lastSnapshot) return;
       if (editing()) { pendingRender = true; setTimeout(pull, 4000); return; }
-      lastSnapshot = snapshot;
-      model = server; persistLocal(); rebuild(); renderKeepingFocus();
+      model = server; persistLocal(); rebuild(); renderKeepingFocus(); scheduleHistory();
     }).catch(function (err) {
       pulling = false;
       if (err.message !== "auth" && err.message !== "unconfigured") { online = false; updateSyncState(); }
     });
+  }
+  function applyDelta(data) {
+    var changes = data.items.length + data.answers.length + data.solutions.length;
+    if (!changes) { model.rev = data.rev; persistLocal(); return; }
+    // Keep the revision unchanged while someone types, so the same delta is
+    // fetched again once they pause.
+    if (editing()) { pendingRender = true; setTimeout(pull, 4000); return; }
+    data.items.forEach(function (r) {
+      if (hasPending(r.collection, r.id)) return;
+      var b = model.items[r.collection] = model.items[r.collection] || {};
+      if (r.deleted) delete b[r.id]; else b[r.id] = r.data;
+    });
+    data.answers.forEach(function (r) {
+      var id = answerId(r.team_id, r.round_id, r.question);
+      if (!hasPending("answers", id)) model.answers[id] = { team_id: r.team_id, round_id: r.round_id, question: r.question, answer: r.answer, points: r.points };
+    });
+    data.solutions.forEach(function (r) {
+      var id = solutionId(r.round_id, r.question);
+      if (!hasPending("solutions", id)) model.solutions[id] = { round_id: r.round_id, question: r.question, solution: r.solution };
+    });
+    model.rev = data.rev;
+    persistLocal(); rebuild(); renderKeepingFocus(); scheduleHistory();
   }
   document.addEventListener("focusout", function () {
     setTimeout(function () { if (pendingRender && !editing()) { pendingRender = false; pull(); } }, 50);
@@ -800,17 +879,21 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   }
 
   /* ---------- Login ---------- */
-  function showLogin() { byId("login").hidden = false; updateSyncState(); setTimeout(function () { byId("loginPw").focus(); }, 0); }
+  function showLogin() {
+    byId("login").hidden = false; byId("loginName").value = myName(); updateSyncState();
+    setTimeout(function () { byId(myName() ? "loginPw" : "loginName").focus(); }, 0);
+  }
   byId("loginForm").addEventListener("submit", function (e) {
     e.preventDefault();
     byId("loginErr").textContent = "";
+    setMyName(byId("loginName").value); byId("myName").value = myName();
     api("api/login", { method: "POST", body: JSON.stringify({ password: byId("loginPw").value }) })
       .then(function (res) {
         if (res.status === 401) throw new Error("Falsches Passwort");
         if (res.status === 503) throw new Error("Server noch nicht eingerichtet (ORGA_PASSWORD fehlt)");
         if (!res.ok) throw new Error("Fehler " + res.status);
         auth = "ok"; byId("loginPw").value = ""; byId("login").hidden = true;
-        return pull().then(flush);
+        return pull().then(flush).then(loadHistory);
       })
       .catch(function (err) { byId("loginErr").textContent = err.message === "Failed to fetch" ? "Keine Verbindung zum Server" : err.message; });
   });
@@ -847,6 +930,20 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     var a = el("a", { href: URL.createObjectURL(blob), download: name });
     document.body.appendChild(a); a.click(); a.remove();
   }
+
+  // Single-line look, but wraps and grows so long texts stay readable.
+  function fit(ta) { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; }
+  function growArea(value, label, onChange) {
+    var ta = el("textarea", { class: "inline txt", rows: 1, "aria-label": label, oninput: function (e) { fit(e.target); onChange(e.target.value); } });
+    ta.value = value || "";
+    ta.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); ta.blur(); } });
+    requestAnimationFrame(function () { fit(ta); });
+    return ta;
+  }
+  window.addEventListener("resize", function () { document.querySelectorAll("textarea.inline").forEach(fit); });
+  document.querySelectorAll("nav.tabs button").forEach(function (b) {
+    b.addEventListener("click", function () { requestAnimationFrame(function () { document.querySelectorAll("textarea.inline").forEach(fit); }); });
+  });
 
   /* ---------- Tabs ---------- */
   document.querySelectorAll("nav.tabs button").forEach(function (b) {
@@ -887,16 +984,50 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     state.decisions.forEach(function (d) {
       ul.appendChild(el("li", { class: d.done ? "done" : "" }, [
         el("input", { type: "checkbox", checked: d.done, "aria-label": "geklärt", onchange: function (e) { d.done = e.target.checked; put("decisions", d); renderDerived(); renderDecisions(); } }),
-        el("span", { class: "txt" }, [d.text]),
-        el("span", { class: "tag " + (d.done ? "ok" : "open") }, [d.done ? "geklärt" : "offen"])
+        el("span", { class: "txtcol" }, [
+          el("input", { type: "text", class: "inline", value: d.text, "aria-label": "Entscheidung", oninput: function (e) { d.text = e.target.value; put("decisions", d); } }),
+          el("input", { type: "text", class: "inline small", value: d.note || "", placeholder: "Ergebnis / Notiz", "aria-label": "Ergebnis", oninput: function (e) { d.note = e.target.value; put("decisions", d); } })
+        ]),
+        el("span", { class: "tag " + (d.done ? "ok" : "open") }, [d.done ? "geklärt" : "offen"]),
+        el("button", { class: "icon noprint", title: "Löschen", "aria-label": "Entscheidung löschen", onclick: function () {
+          del("decisions", d.id); rebuild(); renderDecisions(); renderDerived(); scheduleHistory();
+        } }, ["×"])
       ]));
     });
   }
+  byId("addDecision").addEventListener("click", function () {
+    var text = byId("newDecision").value.trim(); if (!text) return;
+    put("decisions", { id: uid(), pos: Date.now(), text: text, note: "", done: false });
+    byId("newDecision").value = ""; rebuild(); renderDecisions(); renderDerived();
+  });
 
   /* ---------- Tasks ---------- */
+  function taskFilter() { return readStorage(FILTER_KEY) || { owner: "", openOnly: false }; }
+  function renderTaskFilter() {
+    var f = taskFilter(), sel = byId("taskOwnerFilter");
+    sel.innerHTML = "";
+    [["", "alle"], ["-", "– niemand –"]].concat(state.roles.map(function (r) { return [r.id, roleName(r.id)]; })).forEach(function (o) {
+      sel.appendChild(el("option", { value: o[0], text: o[1] }));
+    });
+    sel.value = f.owner; byId("taskOpenOnly").checked = !!f.openOnly;
+  }
+  function onTaskFilter() {
+    writeStorage(FILTER_KEY, { owner: byId("taskOwnerFilter").value, openOnly: byId("taskOpenOnly").checked });
+    renderTasks();
+  }
+  byId("taskOwnerFilter").addEventListener("change", onTaskFilter);
+  byId("taskOpenOnly").addEventListener("change", onTaskFilter);
   function renderTasks() {
+    renderTaskFilter();
+    var f = taskFilter();
     var wrap = byId("taskWeeks"); wrap.innerHTML = "";
-    var sorted = state.tasks.slice().sort(function (a, b) { return a.due.localeCompare(b.due) || a.pos - b.pos; });
+    var visible = state.tasks.filter(function (t) {
+      if (f.openOnly && t.done) return false;
+      if (f.owner === "-") return !t.owner;
+      return !f.owner || t.owner === f.owner;
+    });
+    byId("taskFilterInfo").textContent = visible.length === state.tasks.length ? "" : visible.length + " von " + state.tasks.length + " Aufgaben";
+    var sorted = visible.slice().sort(function (a, b) { return a.due.localeCompare(b.due) || a.pos - b.pos; });
     var groups = {};
     sorted.forEach(function (t) { (groups[t.due] = groups[t.due] || []).push(t); });
     var now = today();
@@ -913,10 +1044,16 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
         sel.value = t.owner;
         ul.appendChild(el("li", { class: t.done ? "done" : "" }, [
           el("input", { type: "checkbox", checked: t.done, "aria-label": "erledigt", onchange: function (e) { t.done = e.target.checked; put("tasks", t); renderDerived(); renderTasks(); } }),
-          el("span", { class: "txt" }, [t.text]),
-          el("span", { class: "meta" }, [sel, el("button", { class: "icon noprint", title: "Löschen", "aria-label": "Aufgabe löschen", onclick: function () {
-            del("tasks", t.id); rebuild(); renderDerived(); renderTasks();
-          } }, ["×"])])
+          growArea(t.text, "Aufgabe", function (v) { t.text = v; put("tasks", t); }),
+          el("span", { class: "meta" }, [
+            el("input", { type: "date", class: "due", value: t.due, min: "2026-09-01", max: "2026-12-31", "aria-label": "Fällig", onchange: function (e) {
+              if (!e.target.value || e.target.value === t.due) return; t.due = e.target.value; put("tasks", t); renderTasks(); renderDerived();
+            } }),
+            sel,
+            el("button", { class: "icon noprint", title: "Löschen", "aria-label": "Aufgabe löschen", onclick: function () {
+              del("tasks", t.id); rebuild(); renderDerived(); renderTasks(); scheduleHistory();
+            } }, ["×"])
+          ])
         ]));
       });
       wrap.appendChild(el("div", { class: "week" }, [
@@ -924,7 +1061,23 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
         ul
       ]));
     });
+    if (!sorted.length) wrap.appendChild(el("p", { class: "muted small" }, ["Keine Aufgaben für diesen Filter."]));
   }
+  // All-day calendar entries for open tasks, so deadlines show up in everyone's calendar.
+  byId("exportIcs").addEventListener("click", function () {
+    var esc = function (x) { return String(x || "").replace(/[\\;,]/g, function (c) { return "\\" + c; }).replace(/\n/g, "\\n"); };
+    var day = function (iso) { return iso.replace(/-/g, ""); };
+    var next = function (iso) { var d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10).replace(/-/g, ""); };
+    var stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+    var lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//BrainTap//Quizplanung//DE", "CALSCALE:GREGORIAN", "X-WR-CALNAME:BrainTap Pub-Quiz"];
+    state.tasks.filter(function (t) { return !t.done && t.due; }).forEach(function (t) {
+      lines.push("BEGIN:VEVENT", "UID:" + t.id + "@braintap", "DTSTAMP:" + stamp, "DTSTART;VALUE=DATE:" + day(t.due), "DTEND;VALUE=DATE:" + next(t.due),
+        "SUMMARY:" + esc("Quiz: " + t.text), "DESCRIPTION:" + esc(t.owner ? "Zuständig: " + roleName(t.owner) : "Noch niemand zuständig"), "END:VEVENT");
+    });
+    lines.push("BEGIN:VEVENT", "UID:quizabend@braintap", "DTSTAMP:" + stamp, "DTSTART;VALUE=DATE:20261103", "DTEND;VALUE=DATE:20261104",
+      "SUMMARY:" + esc("BrainTap Pub-Quiz" + (state.meta.venue ? " – " + state.meta.venue : "")), "END:VEVENT", "END:VCALENDAR");
+    download(new Blob([lines.join("\r\n") + "\r\n"], { type: "text/calendar" }), "braintap-termine.ics");
+  });
   byId("addTask").addEventListener("click", function () {
     var text = byId("newTaskText").value.trim(); var due = byId("newTaskDue").value || "2026-11-01";
     if (!text) return;
@@ -993,7 +1146,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       items.forEach(function (it) {
         ul.appendChild(el("li", { class: it.done ? "done" : "" }, [
           el("input", { type: "checkbox", checked: it.done, "aria-label": "erledigt", onchange: function (e) { it.done = e.target.checked; put("tech", it); renderDerived(); renderTech(); } }),
-          el("span", { class: "txt" }, [it.text]),
+          growArea(it.text, "Technik-Punkt", function (v) { it.text = v; put("tech", it); }),
           el("button", { class: "icon noprint", "aria-label": "Punkt löschen", title: "Löschen", onclick: function () {
             del("tech", it.id); rebuild(); renderDerived(); renderTech();
           } }, ["×"])
@@ -1580,6 +1733,63 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     if (show.i < show.slides.length - 1) { show.i++; renderSlide(); }
   });
 
+
+  /* ---------- Activity & trash ---------- */
+  var LABEL = { tasks: "Aufgabe", decisions: "Entscheidung", rounds: "Runde", tech: "Technik", teams: "Team", questions: "Frage", expenses: "Ausgabe", roles: "Rolle", meta: "Rahmendaten", answers: "Antwort", solutions: "Lösung" };
+  function describe(row) {
+    var d = row.data || {};
+    if (row.collection === "meta") return row.id;
+    if (row.collection === "answers") {
+      var t = state.teams.find(function (x) { return x.id === d.team_id; });
+      var r = state.rounds.findIndex(function (x) { return x.id === d.round_id; });
+      return (t ? t.name : "Team") + " · R" + (r + 1) + " F" + d.question;
+    }
+    return d.text || d.name || d.role || row.id;
+  }
+  function ago(ms) {
+    var s = Math.round((Date.now() - ms) / 1000);
+    if (s < 60) return "gerade eben";
+    if (s < 3600) return "vor " + Math.round(s / 60) + " min";
+    if (s < 86400) return "vor " + Math.round(s / 3600) + " h";
+    return new Date(ms).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) + " " + new Date(ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  }
+  var historyTimer = null;
+  function scheduleHistory() { clearTimeout(historyTimer); historyTimer = setTimeout(loadHistory, 1500); }
+  function loadHistory() {
+    if (auth !== "ok") return Promise.resolve();
+    return Promise.all([
+      api("api/history?view=activity&limit=40", { method: "GET" }).then(handleStatus),
+      api("api/history?view=trash&limit=50", { method: "GET" }).then(handleStatus)
+    ]).then(function (res) { renderActivity(res[0].activity); renderTrash(res[1].trash); }).catch(function () { /* offline: keep last list */ });
+  }
+  function renderActivity(rows) {
+    var ul = byId("activityList"); ul.innerHTML = "";
+    rows.forEach(function (r) {
+      var verb = r.deleted ? "gelöscht" : r.data && r.data.done ? "erledigt" : "geändert";
+      ul.appendChild(el("li", null, [
+        el("span", { class: "who" }, [r.by || "unbekannt"]),
+        el("span", { class: "what", title: describe(r) }, [(LABEL[r.collection] || r.collection) + " " + verb + ": " + describe(r)]),
+        el("span", { class: "when" }, [ago(r.at)])
+      ]));
+    });
+    if (!rows.length) ul.appendChild(el("li", { class: "muted small" }, ["Noch keine Änderungen."]));
+  }
+  function renderTrash(rows) {
+    var ul = byId("trashList"); ul.innerHTML = "";
+    rows.forEach(function (r) {
+      ul.appendChild(el("li", null, [
+        el("span", { class: "what", title: describe(r) }, [(LABEL[r.collection] || r.collection) + ": " + describe(r)]),
+        el("span", { class: "when" }, [(r.by || "unbekannt") + ", " + (r.at ? ago(r.at) : "")]),
+        el("button", { class: "btn", onclick: function () {
+          put(r.collection, r.data, r.id); rebuild(); renderAll(); scheduleHistory();
+        } }, ["Wiederherstellen"])
+      ]));
+    });
+    if (!rows.length) ul.appendChild(el("li", { class: "muted small" }, ["Papierkorb ist leer."]));
+  }
+  byId("refreshHistory").addEventListener("click", loadHistory);
+  byId("myName").addEventListener("change", function (e) { setMyName(e.target.value); e.target.value = myName(); });
+
   /* ---------- Derived values (no input re-render, keeps focus) ---------- */
   function renderDerived() {
     var total = 0;
@@ -1704,7 +1914,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   outbox = readStorage(OUTBOX_KEY) || [];
   outbox.forEach(function (o) { lastTs = Math.max(lastTs, o.ts); });
   if (cached && cached.items) {
-    model = { items: cached.items, answers: cached.answers || {}, solutions: cached.solutions || {} };
+    model = { items: cached.items, answers: cached.answers || {}, solutions: cached.solutions || {}, rev: cached.rev || 0 };
   } else {
     // Nothing cached yet: show the template right away; the first pull replaces
     // it with the server state, or seeds an empty server with it.
@@ -1714,7 +1924,8 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   renderAll();
   updateSyncState();
   try { var tab = localStorage.getItem(TAB_KEY); if (tab && byId("panel-" + tab)) showTab(tab); } catch (e) { /* ignore */ }
-  pull().then(flush);
+  byId("myName").value = myName();
+  pull().then(flush).then(loadHistory);
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () { /* offline reload unavailable */ });
 })();
 </script>

@@ -7,7 +7,7 @@ Planung für das Pub-Quiz am 3. November 2026 (Köln/Bonn, ca. 40 Personen, 6–
 - [`index.html`](index.html): Startseite der Planungssession.
 - [`planung.html`](planung.html): Entscheidungen, Zeitplan & To-dos, Runden-Planer mit Ablauf, Fragen-Bank (Status, KI-Test, Multiple Choice, Schätzfragen), Beamer-Präsentation mit Countdown, Razzia-Export, Druck von Antwortbögen und Moderationskarten, Kasse & Budget, Technik-Checkliste, Teams, Antworterfassung und Scoreboard mit Beamer-Ansicht.
 
-Alles wird auf dem Server gespeichert: Vercel Functions unter `api/` schreiben in eine SQLite-Datenbank bei Turso (libSQL). Jede Aufgabe, Runde, Punktzahl und Antwort ist eine eigene Zeile; bei gleichzeitigen Änderungen gewinnt pro Zeile die neuere. Zugriff nur mit dem gemeinsamen Orga-Passwort. Ohne Netz puffert der Browser Änderungen und schickt sie nach; ein Service Worker hält die Seite offline ladbar. Export als JSON oder `.sqlite`.
+Alles wird auf dem Server gespeichert: Vercel Functions unter `api/` schreiben in eine SQLite-Datenbank bei Turso (libSQL). Jede Aufgabe, Runde, Punktzahl und Antwort ist eine eigene Zeile; bei gleichzeitigen Änderungen gewinnt pro Zeile die neuere. Jede Änderung trägt eine Server-Revision, den Namen der Person und die Uhrzeit: Clients laden nach dem ersten Abruf nur noch Änderungen (`/api/state?since=N`), die Übersicht zeigt „Letzte Änderungen“, und Gelöschtes lässt sich aus dem Papierkorb wiederherstellen (`/api/history`). Zugriff nur mit dem gemeinsamen Orga-Passwort. Ohne Netz puffert der Browser Änderungen und schickt sie nach; ein Service Worker hält die Seite offline ladbar. Export als JSON oder `.sqlite`.
 
 ### Konfiguration (Vercel)
 
