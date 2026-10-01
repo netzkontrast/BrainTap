@@ -748,7 +748,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   }
   function handleStatus(res) {
     if (res.status === 401) { auth = "needed"; showLogin(); throw new Error("auth"); }
-    if (res.status === 503) { auth = "unconfigured"; updateSyncState(); throw new Error("unconfigured"); }
+    if (res.status === 503) { auth = "unconfigured"; updateSyncState(); showSetupHelp(); throw new Error("unconfigured"); }
     if (!res.ok) throw new Error("HTTP " + res.status);
     auth = "ok"; online = true;
     return res.json();
@@ -810,6 +810,21 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     else if (collection === "solutions") model.solutions[id] = { round_id: row.round_id, question: row.question, solution: row.solution };
     else if (row.deleted) delete bucket(collection)[id];
     else bucket(collection)[id] = row.data;
+  }
+  // Tells whoever opens the page what is still missing on Vercel.
+  var setupShown = false;
+  function showSetupHelp() {
+    if (setupShown) return; setupShown = true;
+    api("api/health", { method: "GET" }).then(function (r) { return r.json(); }).then(function (h) {
+      var steps = [];
+      if (h.storage === "none") steps.push("Speicher anlegen: Vercel → Projekt braintap → Storage → Create → Blob (mit dem Projekt verbinden)");
+      else if (h.database !== "ok") steps.push("Datenbank meldet: " + h.database);
+      if (!/gesetzt/.test(h.password)) steps.push("Passwort setzen: Settings → Environment Variables → ORGA_PASSWORD");
+      if (!steps.length) return;
+      var n = byId("notice");
+      n.textContent = "Server noch nicht eingerichtet, bis dahin wird nur in diesem Browser gespeichert. " + steps.join(" · ") + " · danach neu deployen.";
+      n.hidden = false;
+    }).catch(function () { /* offline */ });
   }
   var noticeTimer = null;
   function showNotice(text) {
@@ -945,7 +960,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
     api("api/login", { method: "POST", body: JSON.stringify({ password: byId("loginPw").value }) })
       .then(function (res) {
         if (res.status === 401) throw new Error("Falsches Passwort");
-        if (res.status === 503) throw new Error("Server noch nicht eingerichtet (ORGA_PASSWORD fehlt)");
+        if (res.status === 503) { showSetupHelp(); throw new Error("Server noch nicht eingerichtet – siehe Hinweis oben"); }
         if (!res.ok) throw new Error("Fehler " + res.status);
         auth = "ok"; byId("loginPw").value = ""; byId("login").hidden = true;
         return pull().then(flush).then(loadHistory).then(migrateLegacyAnswers);

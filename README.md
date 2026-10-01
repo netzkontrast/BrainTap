@@ -11,10 +11,15 @@ Alles wird auf dem Server gespeichert: Vercel Functions unter `api/` schreiben i
 
 ### Konfiguration (Vercel)
 
+Alles läuft auf Vercel. Die Datenbank ist eine SQLite-Datei, die als privater **Vercel Blob** gespeichert wird; jeder Schreibvorgang ist eine Transaktion mit ETag-Prüfung und automatischer Wiederholung bei gleichzeitigen Zugriffen (`api/_snapshot.js`). Alternativ wird eine Turso-Datenbank genutzt, sobald `TURSO_DATABASE_URL` gesetzt ist.
+
 | Variable | Zweck |
 |---|---|
-| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Turso-Datenbank (setzt die Vercel-Marketplace-Integration automatisch) |
+| `BLOB_READ_WRITE_TOKEN` | Wird gesetzt, wenn man im Projekt unter *Storage → Create → Blob* einen Blob Store anlegt und verbindet |
 | `ORGA_PASSWORD` | Gemeinsames Passwort des Orga-Teams |
+| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Optional statt Blob |
+
+`/api/health` zeigt ohne Login, ob Speicher und Passwort eingerichtet sind.
 
 ### Lokal starten
 

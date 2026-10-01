@@ -20,22 +20,45 @@ export const ITEM_COLLECTIONS = new Set([
   "expenses",
 ])
 
-let client = null
 let ready = null
 
-export function db() {
-  if (!client) {
-    const url = process.env.TURSO_DATABASE_URL
-    if (!url) {
-      throw new HttpError(503, "TURSO_DATABASE_URL ist nicht gesetzt")
-    }
-    client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN })
+// Storage backends, in order of preference:
+// - TURSO_DATABASE_URL: libSQL/Turso (also `file:` URLs for local dev/tests)
+// - BLOB_READ_WRITE_TOKEN: the SQLite file as a private Vercel Blob, written
+//   transactionally with ETag checks (no third-party database needed)
+async function connect() {
+  if (process.env.TURSO_DATABASE_URL) {
+    return createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN })
   }
-  ready ??= migrate(client).catch((err) => {
-    ready = null
-    throw err
-  })
-  return ready.then(() => client)
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const { createSnapshotClient, vercelBlobStorage } = await import("./_snapshot.js")
+    return createSnapshotClient(await vercelBlobStorage())
+  }
+  throw new HttpError(503, "Keine Datenbank konfiguriert (TURSO_DATABASE_URL oder BLOB_READ_WRITE_TOKEN)")
+}
+
+export function db() {
+  ready ??= connect()
+    .then(async (c) => {
+      await migrate(c)
+      return c
+    })
+    .catch((err) => {
+      ready = null
+      throw err
+    })
+  return ready
+}
+
+// Tests can run the API against another client (e.g. the snapshot backend).
+export function useClientForTests(c) {
+  ready = migrate(c).then(() => c)
+}
+
+export function storageKind() {
+  if (process.env.TURSO_DATABASE_URL) return "turso"
+  if (process.env.BLOB_READ_WRITE_TOKEN) return "vercel-blob"
+  return "none"
 }
 
 // Columns added after the first release. Each sync batch bumps sync_rev once

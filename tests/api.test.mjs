@@ -8,6 +8,15 @@ const dir = mkdtempSync(join(tmpdir(), "braintap-"))
 process.env.TURSO_DATABASE_URL = `file:${join(dir, "test.db")}`
 process.env.ORGA_PASSWORD = "geheim"
 
+// BACKEND=snapshot runs every test below against the Vercel-Blob-style
+// snapshot client (in-memory storage with ETags) instead of libSQL.
+if (process.env.BACKEND === "snapshot") {
+  const { useClientForTests } = await import("../api/_lib.js")
+  const { createSnapshotClient } = await import("../api/_snapshot.js")
+  const { memoryStorage } = await import("./memory-storage.mjs")
+  useClientForTests(createSnapshotClient(memoryStorage()))
+}
+
 const { POST: login } = await import("../api/login.js")
 const { GET: state } = await import("../api/state.js")
 const { POST: sync } = await import("../api/sync.js")
@@ -264,5 +273,17 @@ describe("robustness and sessions", () => {
     const forged = (Date.now() + 10 ** 12) + "." + sig
     const res = await state(new Request(base + "/api/state", { headers: { cookie: "bt_auth=" + forged } }))
     assert.equal(res.status, 401)
+  })
+})
+
+describe("health", () => {
+  test("reports storage and password state without data", async () => {
+    const { GET: health } = await import("../api/health.js")
+    const body = await (await health(new Request(base + "/api/health"))).json()
+    assert.equal(body.database, "ok")
+    assert.equal(body.password, "gesetzt")
+    assert.equal(body.status, "ok")
+    assert.ok(["turso", "vercel-blob", "none"].includes(body.storage))
+    assert.equal(JSON.stringify(body).includes("geheim"), false)
   })
 })
