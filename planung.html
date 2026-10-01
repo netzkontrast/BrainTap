@@ -114,6 +114,27 @@ td input[type="text"] { width: 100%; min-width: 8em; }
 .rank1 td { font-weight: 700; }
 footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
 .ok-text { color: var(--ok); font-weight: 600; }
+.stat-box { display: flex; flex-direction: column; gap: 2px; background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.stat-box b { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.stat-box.neg b { color: var(--warn); }
+#show { position: fixed; inset: 0; z-index: 60; background: #0f0e0b; color: #f3eee2; display: flex; flex-direction: column; padding: 3vh 5vw; }
+#show[hidden] { display: none; }
+.show-top, .show-foot { display: flex; justify-content: space-between; font-size: 2.4vh; color: #a59f90; }
+.show-main { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 3vh; min-height: 0; }
+.show-main h1 { font-size: 9vh; margin: 0; color: #f08a63; line-height: 1.1; }
+.show-main .num { font-size: 3vh; color: #f08a63; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.show-main .text { font-size: 6vh; line-height: 1.2; font-weight: 600; }
+.show-main .sub { font-size: 3vh; color: #c9c2b2; }
+.show-main img { max-height: 40vh; max-width: 100%; object-fit: contain; align-self: flex-start; border-radius: 1vh; }
+.show-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 2vh; font-size: 4vh; }
+.show-opts div { background: #1d1b15; border-radius: 1vh; padding: 1.5vh 2vh; }
+.show-opts div.right { background: #1f4d31; }
+.show-sol { font-size: 5vh; color: #8fe0ad; font-weight: 700; }
+.show-timer { height: 1.2vh; background: #29261e; border-radius: 1vh; overflow: hidden; margin: 2vh 0 1vh; }
+.show-timer div { height: 100%; width: 100%; background: #f08a63; transform-origin: left; }
+.show-timer div.low { background: #e2a64a; }
+#showTime { font-variant-numeric: tabular-nums; font-size: 4vh; color: #f3eee2; font-weight: 700; }
+.show-help { align-self: flex-end; }
 .sync { margin: 6px 0 0; font-size: .8rem; color: var(--muted); }
 .sync.ok { color: var(--ok); }
 .sync.warn { color: var(--warn); font-weight: 600; }
@@ -229,6 +250,21 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
         <label>Preise<br><input type="text" data-meta="prizes" placeholder="z. B. Gutscheine für Platz 1–3" style="width:100%"></label>
       </div>
     </div>
+
+    <div class="card">
+      <h2>Kasse &amp; Budget</h2>
+      <p class="muted small">Einnahmen kommen automatisch aus dem bezahlten Startgeld (Teams &amp; Scoreboard). Ausgaben hier eintragen: Preise, Druck, Material.</p>
+      <div class="grid2" id="budgetStats"></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Ausgabe</th><th class="num">Betrag €</th><th>Bezahlt</th><th></th></tr></thead>
+        <tbody id="expenseTable"></tbody>
+      </table></div>
+      <div class="row noprint" style="margin-top:10px">
+        <input type="text" id="newExpense" placeholder="z. B. Preis Platz 1" style="flex:1;min-width:160px">
+        <input type="number" id="newExpenseAmount" min="0" step="0.5" placeholder="€" style="width:6em">
+        <button class="btn primary" id="addExpense">Hinzufügen</button>
+      </div>
+    </div>
   </section>
 
   <!-- ZEITPLAN -->
@@ -313,6 +349,13 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
         <button class="btn" id="printAllSheets">Antwortbögen (alle Papierrunden)</button>
         <button class="btn" id="printCards">Moderationskarten (alle Runden)</button>
       </div>
+      <h3>Präsentation am Abend</h3>
+      <p class="muted small">Zeigt die Fragen der gewählten Runde im Vollbild auf dem Beamer, mit Countdown aus dem Runden-Planer und Signalton. Steuerung: → / Leertaste weiter, ← zurück, P Timer anhalten/fortsetzen, R Timer neu, L Lösung ein/aus, Esc beenden.</p>
+      <div class="row noprint">
+        <button class="btn primary" id="presentQuestions">Fragen präsentieren</button>
+        <button class="btn" id="presentSolutions">Auflösung präsentieren</button>
+        <label class="small"><input type="checkbox" data-meta-check="presentSound"> Signalton am Ende</label>
+      </div>
       <p class="muted small">Antwortbögen werden pro angelegtem Team mit Teamnamen gedruckt, ohne Teams als leere Vorlage.</p>
     </div>
   </section>
@@ -368,6 +411,14 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
           <label class="small">Team <select id="ansTeam"></select></label>
           <button class="btn" id="ansAllCorrect" title="Leere Punkte-Felder mit 0 füllen">Leere = 0</button>
         </div>
+        <div class="row noprint small" id="estimateBar" hidden style="margin-bottom:10px">
+          <b>Schätzfragen:</b>
+          <label>Platz 1 <input type="number" min="0" step="0.5" data-meta="estP1" style="width:4em"></label>
+          <label>Platz 2 <input type="number" min="0" step="0.5" data-meta="estP2" style="width:4em"></label>
+          <label>Platz 3 <input type="number" min="0" step="0.5" data-meta="estP3" style="width:4em"></label>
+          <button class="btn" id="scoreEstimates">Schätzfragen werten</button>
+          <span id="estimateMsg" class="muted"></span>
+        </div>
         <div class="tablewrap"><table>
           <thead><tr><th class="num">Nr.</th><th>Lösung</th><th id="ansAnswerHead">Antwort</th><th class="num">Punkte</th><th class="noprint"></th></tr></thead>
           <tbody id="ansBody"></tbody>
@@ -406,6 +457,13 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   <footer>Grundlage: <a href="docs/recherche-schummelsicheres-pubquiz.md">Recherche Anti-Schummeln</a> und <a href="docs/recherche-open-source-selbst-hosten.md">Recherche Open Source</a>.</footer>
 </div>
 
+<div id="show" role="dialog" aria-label="Präsentation" hidden>
+  <div class="show-top"><span id="showRound"></span><span id="showCount"></span></div>
+  <div class="show-main" id="showMain"></div>
+  <div class="show-timer"><div id="showBar"></div></div>
+  <div class="show-foot"><span id="showTime"></span><span class="show-help">← → Navigation · P Pause · R Neustart · L Lösung · Esc Ende</span></div>
+</div>
+
 <div id="login" class="overlay" hidden>
   <form class="card login" id="loginForm">
     <h2>Anmelden</h2>
@@ -434,13 +492,13 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   var LEGACY_KEY = "braintap-planung-v1";
   var TAB_KEY = "braintap-tab";
   var EVENT_DATE = new Date(2026, 10, 3);
-  var ARRAY_COLLECTIONS = ["roles", "decisions", "tasks", "rounds", "tech", "teams", "questions"];
+  var ARRAY_COLLECTIONS = ["roles", "decisions", "tasks", "rounds", "tech", "teams", "questions", "expenses"];
   var uid = function () { return Math.random().toString(36).slice(2, 10); };
 
   function defaults() {
     var t = function (due, text, role) { return { id: uid(), due: due, text: text, owner: role || "", done: false }; };
     return {
-      meta: { venue: "", venueContact: "", startTime: "19:30", fee: 10, maxTeamSize: 6, prizes: "", breakAfter: 3, breakMinutes: 15, razziaCooldown: 5, razziaPenalty: 0 },
+      meta: { venue: "", venueContact: "", startTime: "19:30", fee: 10, maxTeamSize: 6, prizes: "", breakAfter: 3, breakMinutes: 15, razziaCooldown: 5, razziaPenalty: 0, estP1: 3, estP2: 2, estP3: 1, presentSound: true },
       roles: [
         { id: "mod", role: "Moderation", person: "" },
         { id: "tech", role: "Technik & Razzia", person: "" },
@@ -808,6 +866,10 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     });
   });
 
+  document.querySelectorAll("[data-meta-check]").forEach(function (inp) {
+    inp.addEventListener("change", function () { setMeta(inp.dataset.metaCheck, inp.checked); });
+  });
+
   /* ---------- Roles ---------- */
   function renderRoles() {
     var tb = byId("roleTable"); tb.innerHTML = "";
@@ -1096,6 +1158,8 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     }
     updateSum();
     byId("ansAllCorrect").disabled = isSol;
+    byId("estimateBar").hidden = !questionsOf(round.id).some(function (q) { return q.estimate; });
+    byId("estimateMsg").textContent = "";
     byId("ansAllCorrect").onclick = function () {
       for (var k = 1; k <= round.questions; k++) if (!ans[k] || ans[k].points == null) upsertAnswer(k, "points", 0);
       renderAnswerGrid();
@@ -1242,14 +1306,15 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       list.appendChild(el("li", { class: "q " + (q.status || "idee") }, [
         head, text, opts,
         el("div", { class: "q-grid" }, [
-          q.mc ? null : field("Lösung", "solution", { "aria-label": "Lösung Frage " + (idx + 1) }),
+          q.mc ? null : field(q.estimate ? "Lösung (Zahl)" : "Lösung", "solution", { "aria-label": "Lösung Frage " + (idx + 1), inputmode: q.estimate ? "decimal" : "text" }),
           field("Medien (URL oder Dateiname)", "media", { placeholder: "z. B. /media/dom.jpg" }),
           field("Notiz für die Moderation", "notes"),
           el("label", null, ["Autor:in", authorSel]),
           el("label", null, ["Status", statusSel])
         ]),
         el("div", { class: "q-flags" }, [
-          el("label", null, [el("input", { type: "checkbox", checked: !!q.mc, onchange: function (e) { q.mc = e.target.checked; save(); renderQuestions(); } }), "Multiple Choice (Razzia)"]),
+          el("label", null, [el("input", { type: "checkbox", checked: !!q.mc, onchange: function (e) { q.mc = e.target.checked; if (q.mc) q.estimate = false; save(); renderQuestions(); } }), "Multiple Choice (Razzia)"]),
+          el("label", null, [el("input", { type: "checkbox", checked: !!q.estimate, onchange: function (e) { q.estimate = e.target.checked; if (q.estimate) q.mc = false; save(); renderQuestions(); } }), "Schätzfrage (am nächsten dran)"]),
           el("label", null, [el("input", { type: "checkbox", checked: !!q.aiTested, onchange: function (e) { q.aiTested = e.target.checked; save(); renderQuestions(); } }), "KI-getestet"]),
           el("label", null, [el("input", { type: "checkbox", checked: !!q.shazamTested, onchange: function (e) { q.shazamTested = e.target.checked; save(); } }), "Shazam/Lens-getestet"])
         ])
@@ -1350,6 +1415,171 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     printDoc("Moderationskarten", body);
   });
 
+
+  /* ---------- Budget ---------- */
+  var EUR = function (v) { return (Number(v) || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" }); };
+  function renderExpenses() {
+    var tb = byId("expenseTable"); tb.innerHTML = "";
+    state.expenses.forEach(function (x) {
+      tb.appendChild(el("tr", null, [
+        el("td", null, [el("input", { type: "text", value: x.text, "aria-label": "Ausgabe", oninput: function (e) { x.text = e.target.value; put("expenses", x); } })]),
+        el("td", { class: "num" }, [el("input", { type: "number", min: 0, step: "0.5", value: x.amount == null ? "" : x.amount, "aria-label": "Betrag", oninput: function (e) { x.amount = Number(e.target.value) || 0; put("expenses", x); renderBudget(); } })]),
+        el("td", null, [el("input", { type: "checkbox", checked: !!x.paid, "aria-label": "bezahlt", onchange: function (e) { x.paid = e.target.checked; put("expenses", x); renderBudget(); } })]),
+        el("td", null, [el("button", { class: "icon noprint", "aria-label": "Ausgabe löschen", title: "Löschen", onclick: function () {
+          del("expenses", x.id); rebuild(); renderExpenses(); renderBudget();
+        } }, ["×"])])
+      ]));
+    });
+    if (!state.expenses.length) tb.appendChild(el("tr", null, [el("td", { colspan: 4, class: "muted small" }, ["Noch keine Ausgaben."])]));
+  }
+  function renderBudget() {
+    var fee = Number(state.meta.fee) || 0;
+    var paidTeams = state.teams.filter(function (t) { return t.paid; }).length;
+    var expected = state.teams.length * fee;
+    var income = paidTeams * fee;
+    var costs = state.expenses.reduce(function (s, x) { return s + (Number(x.amount) || 0); }, 0);
+    var stat = function (label, value, note) {
+      return el("div", { class: "stat-box" }, [el("span", { class: "small muted" }, [label]), el("b", null, [value]), note ? el("span", { class: "small muted" }, [note]) : null]);
+    };
+    var wrap = byId("budgetStats"); wrap.innerHTML = "";
+    wrap.appendChild(stat("Startgeld eingenommen", EUR(income), paidTeams + " von " + state.teams.length + " Teams · erwartet " + EUR(expected)));
+    wrap.appendChild(stat("Ausgaben geplant", EUR(costs), state.expenses.filter(function (x) { return x.paid; }).length + " von " + state.expenses.length + " bezahlt"));
+    var bal = stat("Saldo (erwartet)", EUR(expected - costs), expected - costs < 0 ? "Startgeld deckt die Ausgaben nicht" : "");
+    if (expected - costs < 0) bal.classList.add("neg");
+    wrap.appendChild(bal);
+  }
+  byId("addExpense").addEventListener("click", function () {
+    var text = byId("newExpense").value.trim(); if (!text) return;
+    put("expenses", { id: uid(), pos: Date.now(), text: text, amount: Number(byId("newExpenseAmount").value) || 0, paid: false });
+    byId("newExpense").value = ""; byId("newExpenseAmount").value = "";
+    rebuild(); renderExpenses(); renderBudget();
+  });
+
+  /* ---------- Estimate questions ---------- */
+  // Accepts "1.234,5", "1234.5", "ca. 157 m" and similar.
+  function parseNumber(x) {
+    if (x == null) return NaN;
+    var t = String(x).replace(/[^\d,.\-]/g, "");
+    if (t.indexOf(",") >= 0) t = t.replace(/\./g, "").replace(",", ".");
+    else if (/^\-?\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
+    return t === "" || t === "-" ? NaN : Number(t);
+  }
+  byId("scoreEstimates").addEventListener("click", function () {
+    var round = selectedRound(); if (!round) return;
+    var places = [Number(state.meta.estP1) || 0, Number(state.meta.estP2) || 0, Number(state.meta.estP3) || 0];
+    var qs = questionsOf(round.id), touched = {}, scored = 0, missing = [];
+    qs.forEach(function (q, i) {
+      if (!q.estimate) return;
+      var n = i + 1;
+      var override = model.solutions[solutionId(round.id, n)];
+      var target = parseNumber(override && override.solution ? override.solution : q.solution);
+      if (isNaN(target)) { missing.push(n); return; }
+      var guesses = state.teams.map(function (t) {
+        var a = model.answers[answerId(t.id, round.id, n)];
+        return { team: t, a: a, dist: Math.abs(parseNumber(a && a.answer) - target) };
+      });
+      var valid = guesses.filter(function (g) { return !isNaN(g.dist); }).sort(function (x, y) { return x.dist - y.dist; });
+      // Equal distance shares the place; the next distinct distance takes the next place.
+      var place = 0, prev = null;
+      valid.forEach(function (g, k) { if (g.dist !== prev) { place = k; prev = g.dist; } g.points = places[place] || 0; });
+      guesses.forEach(function (g) {
+        var pts = isNaN(g.dist) ? 0 : g.points;
+        var cur = Object.assign({ team_id: g.team.id, round_id: round.id, question: n, answer: null }, g.a, { points: pts });
+        put("answers", cur, answerId(g.team.id, round.id, n));
+        touched[g.team.id] = true;
+      });
+      scored++;
+    });
+    Object.keys(touched).forEach(function (tid) { syncRoundScore(tid, round.id); });
+    renderAnswerGrid();
+    byId("estimateMsg").textContent = scored + " Schätzfrage" + (scored === 1 ? "" : "n") + " gewertet" +
+      (missing.length ? " · ohne Zahl als Lösung: Frage " + missing.join(", ") : "");
+  });
+
+  /* ---------- Presentation ---------- */
+  var show = { round: null, slides: [], i: 0, reveal: false, timer: null, left: 0, total: 0, paused: false };
+  function isImage(url) { return /^(https?:\/\/|\/)/.test(url || "") && /\.(png|jpe?g|gif|webp|avif|svg)(\?|$)/i.test(url); }
+  function beep() {
+    if (!state.meta.presentSound) return;
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.25].forEach(function (t) {
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.25, ctx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.2);
+        o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.21);
+      });
+    } catch (e) { /* no audio */ }
+  }
+  function startPresentation(reveal) {
+    var round = state.rounds.find(function (r) { return r.id === byId("qRound").value; }); if (!round) return;
+    var qs = questionsOf(round.id).filter(function (q) { return (q.text || "").trim(); });
+    var idx = state.rounds.indexOf(round) + 1;
+    show.round = round; show.reveal = reveal; show.i = 0;
+    show.slides = [{ kind: "title", title: "Runde " + idx + ": " + round.name, sub: reveal ? "Auflösung" : (round.mode + " · " + (Number(round.secs) || 0) + " Sekunden pro Frage") }]
+      .concat(qs.map(function (q, k) { return { kind: "q", q: q, n: k + 1, of: qs.length }; }))
+      .concat([{ kind: "title", title: reveal ? "Ende der Auflösung" : "Ende von Runde " + idx, sub: reveal ? "Punkte werden eingetragen" : "Bögen mit dem Nachbarteam tauschen und abgeben" }]);
+    byId("show").hidden = false;
+    if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(function () {});
+    renderSlide();
+  }
+  function stopTimer() { clearInterval(show.timer); show.timer = null; }
+  function startTimer(secs) {
+    stopTimer(); show.total = secs; show.left = secs; show.paused = false; tick();
+    show.timer = setInterval(function () { if (show.paused) return; show.left -= 0.1; tick(); }, 100);
+  }
+  function tick() {
+    var bar = byId("showBar");
+    if (!show.total) { bar.style.transform = "scaleX(0)"; byId("showTime").textContent = ""; return; }
+    var left = Math.max(0, show.left);
+    bar.style.transform = "scaleX(" + (left / show.total) + ")";
+    bar.classList.toggle("low", left <= 5);
+    byId("showTime").textContent = show.paused ? "Pause" : Math.ceil(left) + " s";
+    if (show.left <= 0) { stopTimer(); byId("showTime").textContent = "Zeit!"; beep(); }
+  }
+  function renderSlide() {
+    var s = show.slides[show.i], main = byId("showMain"); main.innerHTML = "";
+    byId("showRound").textContent = show.round.name + (show.reveal ? " · Auflösung" : "");
+    byId("showCount").textContent = s.kind === "q" ? "Frage " + s.n + " / " + s.of : "";
+    stopTimer(); show.total = 0; tick();
+    if (s.kind === "title") {
+      main.appendChild(el("h1", null, [s.title])); main.appendChild(el("div", { class: "sub" }, [s.sub]));
+      return;
+    }
+    var q = s.q;
+    main.appendChild(el("div", { class: "num" }, ["Frage " + s.n]));
+    main.appendChild(el("div", { class: "text" }, [q.text]));
+    if (isImage(q.media)) main.appendChild(el("img", { src: q.media, alt: "" }));
+    if (q.mc && q.options) {
+      main.appendChild(el("div", { class: "show-opts" }, q.options.map(function (o, j) {
+        return o ? el("div", { class: show.reveal && j === q.correct ? "right" : "" }, ["ABCD"[j] + ")  " + o]) : null;
+      }).filter(Boolean)));
+    }
+    var sol = el("div", { class: "show-sol", id: "showSol" }, ["Lösung: " + (q.solution || correctOption(q) || "–")]);
+    sol.hidden = !show.reveal; main.appendChild(sol);
+    if (!show.reveal) startTimer(Number(show.round.secs) || 0);
+  }
+  function endPresentation() {
+    stopTimer(); byId("show").hidden = true;
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {});
+  }
+  byId("presentQuestions").addEventListener("click", function () { startPresentation(false); });
+  byId("presentSolutions").addEventListener("click", function () { startPresentation(true); });
+  document.addEventListener("keydown", function (e) {
+    if (byId("show").hidden) return;
+    var k = e.key;
+    if (k === "ArrowRight" || k === " " || k === "PageDown") { e.preventDefault(); if (show.i < show.slides.length - 1) { show.i++; renderSlide(); } }
+    else if (k === "ArrowLeft" || k === "PageUp") { e.preventDefault(); if (show.i > 0) { show.i--; renderSlide(); } }
+    else if (k === "p" || k === "P") { if (show.timer) { show.paused = !show.paused; tick(); } }
+    else if (k === "r" || k === "R") { if (show.slides[show.i].kind === "q") startTimer(Number(show.round.secs) || 0); }
+    else if (k === "l" || k === "L") { var sol = byId("showSol"); if (sol) sol.hidden = !sol.hidden; }
+    else if (k === "Escape") { e.stopImmediatePropagation(); endPresentation(); }
+  }, true);
+  byId("show").addEventListener("click", function (e) {
+    if (e.target.closest(".show-foot")) return;
+    if (show.i < show.slides.length - 1) { show.i++; renderSlide(); }
+  });
+
   /* ---------- Derived values (no input re-render, keeps focus) ---------- */
   function renderDerived() {
     var total = 0;
@@ -1380,6 +1610,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       " · Startgeld bezahlt: " + paid + "/" + teams + " · Kasse: " + (paid * fee).toLocaleString("de-DE", { style: "currency", currency: "EUR" }) +
       (teams > 10 ? " · Achtung: mehr als 10 Teams" : "");
 
+    renderBudget();
     renderProgress();
     if (byId("beamer").classList.contains("on")) renderBeamer();
   }
@@ -1463,6 +1694,8 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
 
   function renderAll() {
     document.querySelectorAll("[data-meta]").forEach(function (inp) { inp.value = state.meta[inp.dataset.meta] != null ? state.meta[inp.dataset.meta] : ""; });
+    document.querySelectorAll("[data-meta-check]").forEach(function (inp) { inp.checked = !!state.meta[inp.dataset.metaCheck]; });
+    renderExpenses();
     renderRoles(); renderDecisions(); renderTasks(); renderRounds(); renderTech(); renderTeams(); renderScores(); renderCountdown(); renderAnswerSelectors(); renderQuestions();
   }
 
