@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8D%BA%3C/text%3E%3C/svg%3E">
 <title>BrainTap Pub-Quiz</title>
 <style>
 :root {
@@ -77,7 +78,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
     <li><a href="https://github.com/netzkontrast/Razzia/tree/dev">Razzia-Fork (Zweig dev)<span>Quiz-Software für die Speed-Runde</span></a></li>
   </ul>
 
-  <footer>Alle Eingaben im Planungstool bleiben im Browser. Nichts wird an einen Server gesendet.</footer>
+  <footer>Das Planungstool speichert alles passwortgeschützt auf dem Server und funktioniert auch kurzzeitig offline.</footer>
 </main>
 <script>
 (function () {
@@ -86,5 +87,6 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
   document.getElementById("days").textContent = d > 0 ? d : d === 0 ? "Heute" : "vorbei";
 })();
 </script>
+<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () {});</script>
 </body>
 </html>
