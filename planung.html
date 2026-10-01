@@ -113,6 +113,14 @@ td input[type="text"] { width: 100%; min-width: 8em; }
 .ros td:first-child { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
 .rank1 td { font-weight: 700; }
 footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
+.sync { margin: 6px 0 0; font-size: .8rem; color: var(--muted); }
+.sync.ok { color: var(--ok); }
+.sync.warn { color: var(--warn); font-weight: 600; }
+.overlay { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.overlay[hidden] { display: none; }
+.login { width: 100%; max-width: 360px; margin: 0; }
+.login input[type="password"] { width: 100%; margin: 4px 0 8px; }
+.err { color: var(--warn); min-height: 1.2em; margin: 0 0 8px; }
 /* Beamer view */
 #beamer { position: fixed; inset: 0; background: #0f0e0b; color: #f3eee2; z-index: 50; display: none; flex-direction: column; padding: 4vh 6vw; }
 #beamer.on { display: flex; }
@@ -142,7 +150,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       <h1>BrainTap Quizplanung</h1>
       <p class="sub">Pub-Quiz am <b>Dienstag, 3. November 2026</b>, Köln/Bonn, ca. 40 Personen, 6–10 Teams</p>
     </div>
-    <div class="countdown" aria-live="polite"><strong id="daysLeft">–</strong><span>Tage bis zum Quiz</span></div>
+    <div class="countdown"><strong id="daysLeft">–</strong><span>Tage bis zum Quiz</span><p id="syncState" class="sync" role="status" aria-live="polite">Verbinde …</p></div>
   </header>
 
   <div class="chips" aria-label="Rahmenentscheidungen">
@@ -298,10 +306,9 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     </div>
 
     <div class="card">
-      <h2>Antworten erfassen <span class="tag">SQLite lokal</span></h2>
-      <p class="muted small">Antworten aus den Papierbögen pro Team und Frage eintragen. Die Summe der Punkte geht automatisch als Rundenergebnis ins Scoreboard. Die Daten liegen in einer SQLite-Datenbank in diesem Browser und lassen sich als <code>.sqlite</code>-Datei exportieren.</p>
-      <p class="small" id="dbStatus">Datenbank wird geladen …</p>
-      <div id="answerUi" hidden>
+      <h2>Antworten erfassen <span class="tag">SQLite</span></h2>
+      <p class="muted small">Antworten aus den Papierbögen pro Team und Frage eintragen. Die Summe der Punkte geht automatisch als Rundenergebnis ins Scoreboard. Gespeichert wird in der SQLite-Datenbank auf dem Server (Turso). Als <code>.sqlite</code>-Datei exportierbar.</p>
+      <div id="answerUi">
         <div class="row noprint" style="margin-bottom:10px">
           <label class="small">Runde <select id="ansRound"></select></label>
           <label class="small">Team <select id="ansTeam"></select></label>
@@ -333,17 +340,30 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
 
   <div class="card noprint">
     <h2>Daten teilen &amp; sichern</h2>
-    <p class="muted small">Alles wird nur in diesem Browser gespeichert. Für das Orga-Team: exportieren und die Datei teilen, die anderen importieren sie.</p>
+    <p class="muted small">Alles wird auf dem Server gespeichert und ist für das ganze Orga-Team sichtbar. Ohne Netz puffert der Browser die Änderungen und schickt sie nach, sobald wieder Verbindung besteht. Export als Sicherungskopie.</p>
     <div class="row">
       <button class="btn" id="exportBtn">Export (JSON)</button>
       <label class="btn" style="display:inline-block">Import (JSON)<input type="file" id="importFile" accept="application/json" hidden></label>
       <button class="btn" id="printBtn">Drucken</button>
-      <button class="btn" id="resetBtn">Zurücksetzen</button>
-      <span class="small muted" id="saveState"></span>
+      <button class="btn" id="logoutBtn">Abmelden</button>
     </div>
   </div>
 
   <footer>Grundlage: <a href="docs/recherche-schummelsicheres-pubquiz.md">Recherche Anti-Schummeln</a> und <a href="docs/recherche-open-source-selbst-hosten.md">Recherche Open Source</a>.</footer>
+</div>
+
+<div id="login" class="overlay" hidden>
+  <form class="card login" id="loginForm">
+    <h2>Anmelden</h2>
+    <p class="muted small">Gemeinsames Passwort des Orga-Teams. Danach werden alle Änderungen auf dem Server gespeichert.</p>
+    <label class="small" for="loginPw">Passwort</label>
+    <input type="password" id="loginPw" autocomplete="current-password" required>
+    <p class="small err" id="loginErr" role="alert"></p>
+    <div class="row">
+      <button class="btn primary" type="submit">Anmelden</button>
+      <button class="btn" type="button" id="loginLater">Später</button>
+    </div>
+  </form>
 </div>
 
 <div id="beamer" role="dialog" aria-label="Scoreboard">
@@ -352,12 +372,15 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   <ol id="beamerList"></ol>
 </div>
 
-<script src="vendor/sqljs/sql-wasm.js"></script>
 <script>
 (function () {
   "use strict";
-  var STORAGE_KEY = "braintap-planung-v1";
+  var CACHE_KEY = "braintap-cache-v2";
+  var OUTBOX_KEY = "braintap-outbox-v2";
+  var LEGACY_KEY = "braintap-planung-v1";
+  var TAB_KEY = "braintap-tab";
   var EVENT_DATE = new Date(2026, 10, 3);
+  var ARRAY_COLLECTIONS = ["roles", "decisions", "tasks", "rounds", "tech", "teams"];
   var uid = function () { return Math.random().toString(36).slice(2, 10); };
 
   function defaults() {
@@ -427,28 +450,265 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     };
   }
 
-  var state = load();
+  // Stable ids for the template rows, so two organisers seeding at the same
+  // time end up with the same rows instead of duplicates.
+  function seededDefaults() {
+    var d = defaults();
+    var prefix = { decisions: "d", tasks: "t", rounds: "r", tech: "x" };
+    ARRAY_COLLECTIONS.forEach(function (c) {
+      d[c].forEach(function (x, i) {
+        if (prefix[c]) x.id = prefix[c] + String(i + 1).padStart(2, "0");
+        x.pos = i;
+      });
+    });
+    return d;
+  }
+  var TEMPLATE = seededDefaults();
+  var META_DEFAULTS = TEMPLATE.meta;
+  var TECH_GROUPS = TEMPLATE.techGroups;
 
-  function load() {
-    try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) { return Object.assign(defaults(), JSON.parse(raw)); }
-    } catch (e) { /* storage unavailable */ }
-    return defaults();
-  }
-  var saveTimer;
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); setSaveState("Gespeichert"); }
-    catch (e) { setSaveState("Speichern nicht möglich – bitte exportieren"); }
-  }
-  function setSaveState(msg) {
-    var el = document.getElementById("saveState");
-    el.textContent = msg;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(function () { el.textContent = ""; }, 1500);
-  }
-  function changed() { save(); renderDerived(); }
+  /* ---------- Model, local cache and outbox ---------- */
+  // model.items[collection][id] = data; answers/solutions are keyed rows.
+  var model = { items: {}, answers: {}, solutions: {} };
+  var outbox = [];
+  var state = null;
+  var lastTs = 0;
+  var auth = "unknown"; // unknown | ok | needed | unconfigured
+  var online = true;
 
+  function readStorage(key) { try { var raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
+  function writeStorage(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; } }
+  function persistLocal() {
+    if (!writeStorage(CACHE_KEY, model) || !writeStorage(OUTBOX_KEY, outbox)) setSync("Lokaler Speicher voll – bitte exportieren", "warn");
+  }
+  function nextTs() { lastTs = Math.max(Date.now(), lastTs + 1); return lastTs; }
+  function opKey(c, id) { return c + "\u0000" + id; }
+  function answerId(team, round, n) { return team + "|" + round + "|" + n; }
+  function solutionId(round, n) { return round + "|" + n; }
+  function bucket(c) {
+    if (c === "answers") return model.answers;
+    if (c === "solutions") return model.solutions;
+    return (model.items[c] = model.items[c] || {});
+  }
+
+  function applyOp(m, op) {
+    var target = op.collection === "answers" ? m.answers : op.collection === "solutions" ? m.solutions : (m.items[op.collection] = m.items[op.collection] || {});
+    if (op.op === "del") delete target[op.id];
+    else if (op.op === "seed") { if (!(op.id in target)) target[op.id] = clone(op.data); }
+    else target[op.id] = clone(op.data);
+  }
+  function clone(x) { return x == null ? x : JSON.parse(JSON.stringify(x)); }
+
+  function enqueue(op, collection, id, data) {
+    var entry = { key: opKey(collection, id), op: op, collection: collection, id: id, data: clone(data), ts: nextTs() };
+    if (op !== "seed") outbox = outbox.filter(function (o) { return o.key !== entry.key; });
+    outbox.push(entry);
+    persistLocal();
+    scheduleFlush();
+  }
+  function put(collection, obj, id) {
+    id = id || obj.id;
+    bucket(collection)[id] = obj;
+    enqueue("put", collection, id, obj);
+  }
+  function del(collection, id) {
+    delete bucket(collection)[id];
+    enqueue("del", collection, id, null);
+  }
+  function setMeta(key, value) {
+    if (key === "showUpTo") state.showUpTo = value; else state.meta[key] = value;
+    put("meta", { value: value }, key);
+  }
+  function setScore(team, round, value) {
+    state.scores[team] = state.scores[team] || {};
+    state.scores[team][round] = value;
+    put("scores", { team: team, round: round, value: value }, team + ":" + round);
+  }
+
+  function stateToOps(s, op) {
+    var ops = [];
+    Object.keys(s.meta || {}).forEach(function (k) { ops.push({ op: op, collection: "meta", id: k, data: { value: s.meta[k] } }); });
+    if (s.showUpTo) ops.push({ op: op, collection: "meta", id: "showUpTo", data: { value: s.showUpTo } });
+    ARRAY_COLLECTIONS.forEach(function (c) {
+      (s[c] || []).forEach(function (x, i) {
+        if (x.pos == null) x.pos = i;
+        ops.push({ op: op, collection: c, id: x.id, data: x });
+      });
+    });
+    Object.keys(s.scores || {}).forEach(function (team) {
+      Object.keys(s.scores[team]).forEach(function (round) {
+        ops.push({ op: op, collection: "scores", id: team + ":" + round, data: { team: team, round: round, value: s.scores[team][round] } });
+      });
+    });
+    return ops;
+  }
+  function applyAndQueue(ops) {
+    ops.forEach(function (o) { applyOp(model, o); enqueue(o.op, o.collection, o.id, o.data); });
+  }
+
+  function list(c) {
+    var o = model.items[c] || {};
+    return Object.keys(o).map(function (k) { return o[k]; }).sort(function (a, b) {
+      return (Number(a.pos) || 0) - (Number(b.pos) || 0) || String(a.id).localeCompare(String(b.id));
+    });
+  }
+  function rebuild() {
+    state = { meta: Object.assign({}, META_DEFAULTS), techGroups: TECH_GROUPS, scores: {}, showUpTo: "" };
+    ARRAY_COLLECTIONS.forEach(function (c) { state[c] = list(c); });
+    var meta = model.items.meta || {};
+    Object.keys(meta).forEach(function (k) {
+      if (k === "showUpTo") state.showUpTo = meta[k].value; else state.meta[k] = meta[k].value;
+    });
+    var scores = model.items.scores || {};
+    Object.keys(scores).forEach(function (k) {
+      var s = scores[k];
+      (state.scores[s.team] = state.scores[s.team] || {})[s.round] = s.value;
+    });
+  }
+
+  /* ---------- Server sync ---------- */
+  var flushing = false, flushTimer = null, retryDelay = 2000, flushSeq = 0;
+  function scheduleFlush(delay) {
+    clearTimeout(flushTimer);
+    flushTimer = setTimeout(flush, delay == null ? 400 : delay);
+    updateSyncState();
+  }
+  function api(path, options) {
+    return fetch(path, Object.assign({ credentials: "same-origin", headers: { "content-type": "application/json" } }, options));
+  }
+  function handleStatus(res) {
+    if (res.status === 401) { auth = "needed"; showLogin(); throw new Error("auth"); }
+    if (res.status === 503) { auth = "unconfigured"; updateSyncState(); throw new Error("unconfigured"); }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    auth = "ok"; online = true;
+    return res.json();
+  }
+  function flush() {
+    if (flushing || !outbox.length || auth === "needed" || auth === "unconfigured") { updateSyncState(); return; }
+    flushing = true;
+    var batch = outbox.slice(0, 500);
+    updateSyncState();
+    api("api/sync", { method: "POST", body: JSON.stringify({ ops: batch.map(function (o) { return { op: o.op, collection: o.collection, id: o.id, data: o.data, ts: o.ts }; }) }) })
+      .then(handleStatus)
+      .then(function () {
+        var sent = {}; batch.forEach(function (o) { sent[o.key + "@" + o.ts] = true; });
+        outbox = outbox.filter(function (o) { return !sent[o.key + "@" + o.ts]; });
+        flushSeq++; retryDelay = 2000; persistLocal();
+        flushing = false;
+        if (outbox.length) flush(); else updateSyncState();
+      })
+      .catch(function (err) {
+        flushing = false;
+        if (err.message === "auth" || err.message === "unconfigured") return;
+        online = false; updateSyncState();
+        scheduleFlush(retryDelay); retryDelay = Math.min(retryDelay * 2, 30000);
+      });
+  }
+
+  var pulling = false, pendingRender = false, lastSnapshot = "", lastInputAt = 0;
+  document.addEventListener("input", function () { lastInputAt = Date.now(); });
+  function focusedField() {
+    var a = document.activeElement;
+    return a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox" && !a.closest("#login") ? a : null;
+  }
+  // Only hold back remote updates while someone is actively typing.
+  function editing() { return !!focusedField() && Date.now() - lastInputAt < 4000; }
+  // Re-rendering replaces the inputs; put the cursor back into the same field.
+  function renderKeepingFocus() {
+    var f = focusedField(), fields, idx, label, caret;
+    if (f) {
+      fields = Array.prototype.slice.call(document.querySelectorAll("input, select, textarea"));
+      idx = fields.indexOf(f); label = f.getAttribute("aria-label") || f.dataset.meta || f.id;
+      try { caret = f.selectionStart; } catch (e) { caret = null; }
+    }
+    renderAll();
+    if (!f) return;
+    var again = document.querySelectorAll("input, select, textarea")[idx];
+    if (again && (again.getAttribute("aria-label") || again.dataset.meta || again.id) === label) {
+      again.focus();
+      try { if (caret != null) again.setSelectionRange(caret, caret); } catch (e) { /* not a text field */ }
+    }
+  }
+  function pull() {
+    if (pulling || auth === "unconfigured") return Promise.resolve();
+    pulling = true;
+    var seqAtStart = flushSeq;
+    return api("api/state", { method: "GET" }).then(handleStatus).then(function (data) {
+      pulling = false;
+      // A flush finished while this request was in flight, so the response
+      // may predate our own writes. Ask again rather than show stale rows.
+      if (flushSeq !== seqAtStart) { setTimeout(pull, 200); return; }
+      var server = { items: {}, answers: {}, solutions: {} };
+      data.items.forEach(function (r) { (server.items[r.collection] = server.items[r.collection] || {})[r.id] = r.data; });
+      data.answers.forEach(function (r) { server.answers[answerId(r.team_id, r.round_id, r.question)] = { team_id: r.team_id, round_id: r.round_id, question: r.question, answer: r.answer, points: r.points }; });
+      data.solutions.forEach(function (r) { server.solutions[solutionId(r.round_id, r.question)] = { round_id: r.round_id, question: r.question, solution: r.solution }; });
+
+      if (!data.items.length) {
+        // Empty server: seed it from this browser's earlier local data or the
+        // template. Seeds never overwrite rows, so pending edits survive.
+        var legacy = readStorage(LEGACY_KEY);
+        model = server;
+        outbox.forEach(function (o) { applyOp(model, o); });
+        applyAndQueue(stateToOps(legacy || TEMPLATE, "seed"));
+        try { localStorage.removeItem(LEGACY_KEY); } catch (e) { /* ignore */ }
+        rebuild(); renderAll(); persistLocal();
+        return;
+      }
+
+      outbox.forEach(function (o) { applyOp(server, o); });
+      var snapshot = JSON.stringify(server);
+      if (outbox.length) scheduleFlush(0); else updateSyncState();
+      if (snapshot === lastSnapshot) return;
+      if (editing()) { pendingRender = true; setTimeout(pull, 4000); return; }
+      lastSnapshot = snapshot;
+      model = server; persistLocal(); rebuild(); renderKeepingFocus();
+    }).catch(function (err) {
+      pulling = false;
+      if (err.message !== "auth" && err.message !== "unconfigured") { online = false; updateSyncState(); }
+    });
+  }
+  document.addEventListener("focusout", function () {
+    setTimeout(function () { if (pendingRender && !editing()) { pendingRender = false; pull(); } }, 50);
+  });
+  setInterval(function () { if (document.visibilityState === "visible") pull(); }, 10000);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") pull(); });
+  window.addEventListener("online", function () { online = true; flush(); pull(); });
+
+  function setSync(text, kind) {
+    var el = byId("syncState"); el.textContent = text; el.className = "sync " + (kind || "");
+  }
+  function updateSyncState() {
+    var n = outbox.length;
+    if (auth === "unconfigured") return setSync("Server nicht eingerichtet – nur lokal gespeichert" + (n ? " (" + n + " ausstehend)" : ""), "warn");
+    if (auth === "needed") return setSync("Nicht angemeldet" + (n ? " – " + n + " Änderungen warten" : ""), "warn");
+    if (!online) return setSync("Offline – " + n + " Änderung" + (n === 1 ? "" : "en") + " werden nachgereicht", "warn");
+    if (n || flushing) return setSync("Speichere …", "");
+    if (auth === "ok") return setSync("Auf dem Server gespeichert", "ok");
+    setSync("Verbinde …", "");
+  }
+
+  /* ---------- Login ---------- */
+  function showLogin() { byId("login").hidden = false; updateSyncState(); setTimeout(function () { byId("loginPw").focus(); }, 0); }
+  byId("loginForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    byId("loginErr").textContent = "";
+    api("api/login", { method: "POST", body: JSON.stringify({ password: byId("loginPw").value }) })
+      .then(function (res) {
+        if (res.status === 401) throw new Error("Falsches Passwort");
+        if (res.status === 503) throw new Error("Server noch nicht eingerichtet (ORGA_PASSWORD fehlt)");
+        if (!res.ok) throw new Error("Fehler " + res.status);
+        auth = "ok"; byId("loginPw").value = ""; byId("login").hidden = true;
+        return pull().then(flush);
+      })
+      .catch(function (err) { byId("loginErr").textContent = err.message === "Failed to fetch" ? "Keine Verbindung zum Server" : err.message; });
+  });
+  byId("loginLater").addEventListener("click", function () { byId("login").hidden = true; });
+  byId("logoutBtn").addEventListener("click", function () {
+    if (outbox.length && !confirm(outbox.length + " Änderungen sind noch nicht auf dem Server. Trotzdem abmelden?")) return;
+    api("api/logout", { method: "POST" }).finally(function () { auth = "needed"; showLogin(); });
+  });
+
+  /* ---------- Helpers ---------- */
   function el(tag, attrs, children) {
     var n = document.createElement(tag);
     if (attrs) Object.keys(attrs).forEach(function (k) {
@@ -471,55 +731,56 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     if (!r) return "";
     return r.person ? r.person + " (" + r.role + ")" : r.role;
   }
+  function download(blob, name) {
+    var a = el("a", { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(a); a.click(); a.remove();
+  }
 
-  /* Tabs */
+  /* ---------- Tabs ---------- */
   document.querySelectorAll("nav.tabs button").forEach(function (b) {
     b.addEventListener("click", function () { showTab(b.dataset.tab); });
   });
   function showTab(name) {
     document.querySelectorAll("nav.tabs button").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.tab === name)); });
     document.querySelectorAll("section.panel").forEach(function (p) { p.classList.toggle("active", p.id === "panel-" + name); });
-    try { localStorage.setItem(STORAGE_KEY + "-tab", name); } catch (e) { /* ignore */ }
-    if (name === "score") renderAnswerSelectors();
+    try { localStorage.setItem(TAB_KEY, name); } catch (e) { /* ignore */ }
   }
 
-  /* Meta inputs */
+  /* ---------- Meta inputs ---------- */
   document.querySelectorAll("[data-meta]").forEach(function (inp) {
-    var key = inp.dataset.meta;
-    inp.value = state.meta[key] != null ? state.meta[key] : "";
     inp.addEventListener("input", function () {
-      state.meta[key] = inp.type === "number" ? Number(inp.value) : inp.value;
-      changed();
+      setMeta(inp.dataset.meta, inp.type === "number" ? Number(inp.value) : inp.value);
+      renderDerived();
     });
   });
 
-  /* Roles */
+  /* ---------- Roles ---------- */
   function renderRoles() {
     var tb = byId("roleTable"); tb.innerHTML = "";
     state.roles.forEach(function (r) {
       tb.appendChild(el("tr", null, [
         el("td", { class: "small" }, [r.role]),
-        el("td", null, [el("input", { type: "text", value: r.person, placeholder: "Name", oninput: function (e) { r.person = e.target.value; save(); renderTasks(); } })])
+        el("td", null, [el("input", { type: "text", value: r.person, placeholder: "Name", oninput: function (e) { r.person = e.target.value; put("roles", r); renderTasks(); } })])
       ]));
     });
   }
 
-  /* Decisions */
+  /* ---------- Decisions ---------- */
   function renderDecisions() {
     var ul = byId("decisionList"); ul.innerHTML = "";
     state.decisions.forEach(function (d) {
       ul.appendChild(el("li", { class: d.done ? "done" : "" }, [
-        el("input", { type: "checkbox", checked: d.done, "aria-label": "geklärt", onchange: function (e) { d.done = e.target.checked; changed(); renderDecisions(); } }),
+        el("input", { type: "checkbox", checked: d.done, "aria-label": "geklärt", onchange: function (e) { d.done = e.target.checked; put("decisions", d); renderDerived(); renderDecisions(); } }),
         el("span", { class: "txt" }, [d.text]),
         el("span", { class: "tag " + (d.done ? "ok" : "open") }, [d.done ? "geklärt" : "offen"])
       ]));
     });
   }
 
-  /* Tasks */
+  /* ---------- Tasks ---------- */
   function renderTasks() {
     var wrap = byId("taskWeeks"); wrap.innerHTML = "";
-    var sorted = state.tasks.slice().sort(function (a, b) { return a.due.localeCompare(b.due); });
+    var sorted = state.tasks.slice().sort(function (a, b) { return a.due.localeCompare(b.due) || a.pos - b.pos; });
     var groups = {};
     sorted.forEach(function (t) { (groups[t.due] = groups[t.due] || []).push(t); });
     var now = today();
@@ -529,16 +790,16 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       var overdue = new Date(due + "T00:00:00") < now && openCount > 0;
       var ul = el("ul", { class: "check" });
       items.forEach(function (t) {
-        var sel = el("select", { "aria-label": "Verantwortlich", onchange: function (e) { t.owner = e.target.value; save(); } },
+        var sel = el("select", { "aria-label": "Verantwortlich", onchange: function (e) { t.owner = e.target.value; put("tasks", t); } },
           [el("option", { value: "", text: "– niemand –" })].concat(state.roles.map(function (r) {
             return el("option", { value: r.id, text: roleName(r.id), selected: t.owner === r.id });
           })));
         sel.value = t.owner;
         ul.appendChild(el("li", { class: t.done ? "done" : "" }, [
-          el("input", { type: "checkbox", checked: t.done, "aria-label": "erledigt", onchange: function (e) { t.done = e.target.checked; changed(); renderTasks(); } }),
+          el("input", { type: "checkbox", checked: t.done, "aria-label": "erledigt", onchange: function (e) { t.done = e.target.checked; put("tasks", t); renderDerived(); renderTasks(); } }),
           el("span", { class: "txt" }, [t.text]),
           el("span", { class: "meta" }, [sel, el("button", { class: "icon noprint", title: "Löschen", "aria-label": "Aufgabe löschen", onclick: function () {
-            state.tasks = state.tasks.filter(function (x) { return x.id !== t.id; }); changed(); renderTasks();
+            del("tasks", t.id); rebuild(); renderDerived(); renderTasks();
           } }, ["×"])])
         ]));
       });
@@ -551,33 +812,34 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   byId("addTask").addEventListener("click", function () {
     var text = byId("newTaskText").value.trim(); var due = byId("newTaskDue").value || "2026-11-01";
     if (!text) return;
-    state.tasks.push({ id: uid(), due: due, text: text, owner: "", done: false });
-    byId("newTaskText").value = ""; changed(); renderTasks();
+    put("tasks", { id: uid(), pos: Date.now(), due: due, text: text, owner: "", done: false });
+    byId("newTaskText").value = ""; rebuild(); renderDerived(); renderTasks();
   });
 
-  /* Rounds */
+  /* ---------- Rounds ---------- */
   function roundMinutes(r) { return Math.ceil((Number(r.questions) || 0) * (Number(r.secs) || 0) / 60) + (Number(r.buffer) || 0); }
   function renderRounds() {
     var tb = byId("roundTable"); tb.innerHTML = "";
     state.rounds.forEach(function (r, i) {
       var num = function (key, min, max) {
-        return el("td", { class: "num" }, [el("input", { type: "number", min: min, max: max, value: r[key], "aria-label": key, oninput: function (e) { r[key] = Number(e.target.value); changed(); } })]);
+        return el("td", { class: "num" }, [el("input", { type: "number", min: min, max: max, value: r[key], "aria-label": key, oninput: function (e) { r[key] = Number(e.target.value); put("rounds", r); renderDerived(); } })]);
       };
-      var txt = function (key) { return el("td", null, [el("input", { type: "text", value: r[key], "aria-label": key, oninput: function (e) { r[key] = e.target.value; changed(); } })]); };
+      var txt = function (key) { return el("td", null, [el("input", { type: "text", value: r[key], "aria-label": key, oninput: function (e) { r[key] = e.target.value; put("rounds", r); renderDerived(); } })]); };
       tb.appendChild(el("tr", null, [
         el("td", null, [String(i + 1)]), txt("name"), txt("mode"), num("questions", 1, 50), num("secs", 5, 600), num("buffer", 0, 30),
         el("td", { class: "num", "data-dur": r.id }), txt("anticheat"),
-        el("td", null, [el("input", { type: "checkbox", checked: r.ready, "aria-label": "Fragen fertig", onchange: function (e) { r.ready = e.target.checked; changed(); } })]),
+        el("td", null, [el("input", { type: "checkbox", checked: r.ready, "aria-label": "Fragen fertig", onchange: function (e) { r.ready = e.target.checked; put("rounds", r); renderDerived(); } })]),
         el("td", null, [el("button", { class: "icon noprint", "aria-label": "Runde löschen", title: "Löschen", onclick: function () {
-          state.rounds = state.rounds.filter(function (x) { return x.id !== r.id; }); changed(); renderRounds(); renderScores(); renderAnswerSelectors();
+          if (!confirm("Runde „" + r.name + "“ löschen?")) return;
+          del("rounds", r.id); rebuild(); renderRounds(); renderScores(); renderAnswerSelectors();
         } }, ["×"])])
       ]));
     });
     renderDerived();
   }
   byId("addRound").addEventListener("click", function () {
-    state.rounds.push({ id: uid(), name: "Neue Runde", mode: "Papier", questions: 10, secs: 45, buffer: 5, anticheat: "", ready: false });
-    changed(); renderRounds(); renderScores(); renderAnswerSelectors();
+    put("rounds", { id: uid(), pos: Date.now(), name: "Neue Runde", mode: "Papier", questions: 10, secs: 45, buffer: 5, anticheat: "", ready: false });
+    rebuild(); renderRounds(); renderScores(); renderAnswerSelectors();
   });
 
   function addMinutes(hhmm, mins) {
@@ -603,7 +865,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     row(m, "Ende", "Gesamtdauer ab Begrüßung: " + Math.floor(m / 60) + " h " + (m % 60) + " min");
   }
 
-  /* Tech */
+  /* ---------- Tech ---------- */
   function renderTech() {
     var wrap = byId("techGroups"); wrap.innerHTML = "";
     var sel = byId("newTechGroup"); sel.innerHTML = "";
@@ -614,10 +876,10 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
       var ul = el("ul", { class: "check" });
       items.forEach(function (it) {
         ul.appendChild(el("li", { class: it.done ? "done" : "" }, [
-          el("input", { type: "checkbox", checked: it.done, "aria-label": "erledigt", onchange: function (e) { it.done = e.target.checked; changed(); renderTech(); } }),
+          el("input", { type: "checkbox", checked: it.done, "aria-label": "erledigt", onchange: function (e) { it.done = e.target.checked; put("tech", it); renderDerived(); renderTech(); } }),
           el("span", { class: "txt" }, [it.text]),
           el("button", { class: "icon noprint", "aria-label": "Punkt löschen", title: "Löschen", onclick: function () {
-            state.tech = state.tech.filter(function (x) { return x.id !== it.id; }); changed(); renderTech();
+            del("tech", it.id); rebuild(); renderDerived(); renderTech();
           } }, ["×"])
         ]));
       });
@@ -627,22 +889,23 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   }
   byId("addTech").addEventListener("click", function () {
     var text = byId("newTechText").value.trim(); if (!text) return;
-    state.tech.push({ id: uid(), group: byId("newTechGroup").value, text: text, done: false });
-    byId("newTechText").value = ""; changed(); renderTech();
+    put("tech", { id: uid(), pos: Date.now(), group: byId("newTechGroup").value, text: text, done: false });
+    byId("newTechText").value = ""; rebuild(); renderDerived(); renderTech();
   });
 
-  /* Teams & scores */
+  /* ---------- Teams & scores ---------- */
   function renderTeams() {
     var tb = byId("teamTable"); tb.innerHTML = "";
     state.teams.forEach(function (t) {
       tb.appendChild(el("tr", null, [
-        el("td", null, [el("input", { type: "text", value: t.name, "aria-label": "Teamname", oninput: function (e) { t.name = e.target.value; changed(); } })]),
-        el("td", { class: "num" }, [el("input", { type: "number", min: 1, max: 10, value: t.size || "", "aria-label": "Personen", oninput: function (e) { t.size = Number(e.target.value); changed(); } })]),
-        el("td", null, [el("input", { type: "checkbox", checked: !!t.paid, "aria-label": "Startgeld bezahlt", onchange: function (e) { t.paid = e.target.checked; changed(); } })]),
+        el("td", null, [el("input", { type: "text", value: t.name, "aria-label": "Teamname", oninput: function (e) { t.name = e.target.value; put("teams", t); renderDerived(); } })]),
+        el("td", { class: "num" }, [el("input", { type: "number", min: 1, max: 10, value: t.size || "", "aria-label": "Personen", oninput: function (e) { t.size = Number(e.target.value); put("teams", t); renderDerived(); } })]),
+        el("td", null, [el("input", { type: "checkbox", checked: !!t.paid, "aria-label": "Startgeld bezahlt", onchange: function (e) { t.paid = e.target.checked; put("teams", t); renderDerived(); } })]),
         el("td", null, [el("button", { class: "icon noprint", "aria-label": "Team löschen", title: "Löschen", onclick: function () {
           if (!confirm("Team „" + t.name + "“ samt Punkten löschen?")) return;
-          state.teams = state.teams.filter(function (x) { return x.id !== t.id; }); delete state.scores[t.id];
-          changed(); renderTeams(); renderScores(); renderAnswerSelectors();
+          del("teams", t.id);
+          state.rounds.forEach(function (r) { if (model.items.scores && model.items.scores[t.id + ":" + r.id]) del("scores", t.id + ":" + r.id); });
+          rebuild(); renderTeams(); renderScores(); renderAnswerSelectors();
         } }, ["×"])])
       ]));
     });
@@ -652,20 +915,20 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   byId("newTeam").addEventListener("keydown", function (e) { if (e.key === "Enter") addTeam(); });
   function addTeam() {
     var name = byId("newTeam").value.trim(); if (!name) return;
-    state.teams.push({ id: uid(), name: name, size: Number(byId("newTeamSize").value) || null, paid: false });
+    put("teams", { id: uid(), pos: Date.now(), name: name, size: Number(byId("newTeamSize").value) || null, paid: false });
     byId("newTeam").value = ""; byId("newTeamSize").value = "";
-    changed(); renderTeams(); renderScores(); renderAnswerSelectors();
+    rebuild(); renderTeams(); renderScores(); renderAnswerSelectors();
   }
 
   function score(teamId, roundId) { var s = state.scores[teamId]; return s && s[roundId] != null && s[roundId] !== "" ? Number(s[roundId]) : null; }
   function totals(upToIndex) {
     var rounds = state.rounds.slice(0, upToIndex == null ? state.rounds.length : upToIndex + 1);
-    var list = state.teams.map(function (t) {
+    var all = state.teams.map(function (t) {
       return { team: t, total: rounds.reduce(function (sum, r) { return sum + (score(t.id, r.id) || 0); }, 0) };
     }).sort(function (a, b) { return b.total - a.total || a.team.name.localeCompare(b.team.name); });
     var rank = 0, prev = null;
-    list.forEach(function (x, i) { if (x.total !== prev) { rank = i + 1; prev = x.total; } x.rank = rank; });
-    return list;
+    all.forEach(function (x, i) { if (x.total !== prev) { rank = i + 1; prev = x.total; } x.rank = rank; });
+    return all;
   }
   function upToIndex() {
     var v = state.showUpTo; if (v === "" || v == null) return null;
@@ -682,10 +945,9 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     state.teams.forEach(function (t) {
       tb.appendChild(el("tr", { "data-team": t.id }, [el("td", null, [t.name])].concat(state.rounds.map(function (r) {
         var v = score(t.id, r.id);
-        return el("td", { class: "num" }, [el("input", { type: "number", step: "0.5", value: v == null ? "" : v, "aria-label": t.name + " " + r.name, oninput: function (e) {
-          state.scores[t.id] = state.scores[t.id] || {};
-          state.scores[t.id][r.id] = e.target.value === "" ? null : Number(e.target.value);
-          changed();
+        return el("td", { class: "num" }, [el("input", { type: "number", step: "0.5", value: v == null ? "" : v, "data-score": t.id + ":" + r.id, "aria-label": t.name + " " + r.name, oninput: function (e) {
+          setScore(t.id, r.id, e.target.value === "" ? null : Number(e.target.value));
+          renderDerived();
         } })]);
       })).concat([el("td", { class: "num", "data-total": t.id }), el("td", { class: "num", "data-rank": t.id })])));
     });
@@ -698,9 +960,152 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     sel.value = upToIndex() == null ? "" : state.showUpTo;
     renderDerived();
   }
-  byId("showUpTo").addEventListener("change", function (e) { state.showUpTo = e.target.value; changed(); });
+  byId("showUpTo").addEventListener("change", function (e) { setMeta("showUpTo", e.target.value); renderDerived(); });
 
-  /* Derived values (no input re-render, keeps focus) */
+  /* ---------- Answers ---------- */
+  var SOLUTIONS = "__solutions__";
+  function selectedRound() { return state.rounds.find(function (r) { return r.id === byId("ansRound").value; }); }
+  function answersFor(teamId, roundId) {
+    var out = {};
+    Object.keys(model.answers).forEach(function (k) {
+      var a = model.answers[k];
+      if (a.team_id === teamId && a.round_id === roundId) out[a.question] = a;
+    });
+    return out;
+  }
+  function syncRoundScore(teamId, roundId) {
+    var ans = answersFor(teamId, roundId), n = 0, sum = 0;
+    Object.keys(ans).forEach(function (k) { if (ans[k].points != null) { n++; sum += Number(ans[k].points); } });
+    if (!n) return;
+    setScore(teamId, roundId, sum);
+    var inp = document.querySelector('[data-score="' + teamId + ":" + roundId + '"]'); if (inp) inp.value = sum;
+    renderDerived();
+  }
+  function renderAnswerSelectors() {
+    var rs = byId("ansRound"), ts = byId("ansTeam");
+    var prevR = rs.value, prevT = ts.value;
+    rs.innerHTML = ""; ts.innerHTML = "";
+    state.rounds.forEach(function (r, i) { rs.appendChild(el("option", { value: r.id, text: (i + 1) + " – " + r.name })); });
+    ts.appendChild(el("option", { value: SOLUTIONS, text: "– Lösungen eintragen –" }));
+    state.teams.forEach(function (t) { ts.appendChild(el("option", { value: t.id, text: t.name })); });
+    if (prevR && state.rounds.some(function (r) { return r.id === prevR; })) rs.value = prevR;
+    if (prevT && (prevT === SOLUTIONS || state.teams.some(function (t) { return t.id === prevT; }))) ts.value = prevT;
+    else if (state.teams.length) ts.value = state.teams[0].id;
+    renderAnswerGrid();
+  }
+  function renderAnswerGrid() {
+    var tb = byId("ansBody"); tb.innerHTML = "";
+    var round = selectedRound(); if (!round) { byId("ansSum").textContent = ""; return; }
+    var teamId = byId("ansTeam").value, isSol = teamId === SOLUTIONS;
+    byId("ansAnswerHead").textContent = isSol ? "–" : "Antwort";
+    var ans = isSol ? {} : answersFor(teamId, round.id);
+
+    function upsertAnswer(n, field, value) {
+      var cur = Object.assign({ team_id: teamId, round_id: round.id, question: n, answer: null, points: null }, ans[n]);
+      cur[field] = value; ans[n] = cur;
+      put("answers", cur, answerId(teamId, round.id, n));
+      updateSum(); if (field === "points") syncRoundScore(teamId, round.id);
+    }
+    function updateSum() {
+      byId("dbCount").textContent = Object.keys(model.answers).length + " Antworten gespeichert";
+      if (isSol) { byId("ansSum").textContent = ""; return; }
+      var s = 0; Object.keys(ans).forEach(function (k) { s += Number(ans[k].points) || 0; });
+      byId("ansSum").textContent = String(s);
+    }
+
+    for (var n = 1; n <= (Number(round.questions) || 0); n++) {
+      (function (n) {
+        var sol = model.solutions[solutionId(round.id, n)];
+        var solCell = isSol
+          ? el("input", { type: "text", value: sol ? sol.solution || "" : "", "aria-label": "Lösung " + n, oninput: function (e) {
+              put("solutions", { round_id: round.id, question: n, solution: e.target.value }, solutionId(round.id, n));
+            } })
+          : el("span", { class: "small muted" }, [sol && sol.solution ? sol.solution : "–"]);
+        var row = el("tr", null, [el("td", { class: "num" }, [String(n)]), el("td", null, [solCell])]);
+        if (isSol) {
+          row.appendChild(el("td")); row.appendChild(el("td")); row.appendChild(el("td", { class: "noprint" }));
+        } else {
+          var a = ans[n] || {};
+          var pts = el("input", { type: "number", step: "0.5", value: a.points == null ? "" : a.points, "aria-label": "Punkte Frage " + n, oninput: function (e) {
+            upsertAnswer(n, "points", e.target.value === "" ? null : Number(e.target.value));
+          } });
+          row.appendChild(el("td", null, [el("input", { type: "text", value: a.answer || "", "aria-label": "Antwort Frage " + n, oninput: function (e) { upsertAnswer(n, "answer", e.target.value); } })]));
+          row.appendChild(el("td", { class: "num" }, [pts]));
+          row.appendChild(el("td", { class: "noprint" }, [
+            el("button", { class: "icon", title: "Richtig (1 Punkt)", "aria-label": "Frage " + n + " richtig", onclick: function () { pts.value = 1; upsertAnswer(n, "points", 1); } }, ["✓"]),
+            el("button", { class: "icon", title: "Falsch (0 Punkte)", "aria-label": "Frage " + n + " falsch", onclick: function () { pts.value = 0; upsertAnswer(n, "points", 0); } }, ["✗"])
+          ]));
+        }
+        tb.appendChild(row);
+      })(n);
+    }
+    updateSum();
+    byId("ansAllCorrect").disabled = isSol;
+    byId("ansAllCorrect").onclick = function () {
+      for (var k = 1; k <= round.questions; k++) if (!ans[k] || ans[k].points == null) upsertAnswer(k, "points", 0);
+      renderAnswerGrid();
+    };
+  }
+  byId("ansRound").addEventListener("change", renderAnswerGrid);
+  byId("ansTeam").addEventListener("change", renderAnswerGrid);
+
+  /* ---------- SQLite export/import (sql.js, loaded on demand) ---------- */
+  var sqlReady = null;
+  function loadSql() {
+    if (sqlReady) return sqlReady;
+    sqlReady = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = "vendor/sqljs/sql-wasm.js";
+      s.onload = function () { window.initSqlJs({ locateFile: function (f) { return "vendor/sqljs/" + f; } }).then(resolve, reject); };
+      s.onerror = function () { reject(new Error("sql.js konnte nicht geladen werden")); };
+      document.head.appendChild(s);
+    });
+    sqlReady.catch(function () { sqlReady = null; });
+    return sqlReady;
+  }
+  byId("dbExport").addEventListener("click", function () {
+    loadSql().then(function (SQL) {
+      var d = new SQL.Database();
+      d.run("CREATE TABLE items (collection TEXT, id TEXT, data TEXT, PRIMARY KEY (collection, id))");
+      d.run("CREATE TABLE answers (team_id TEXT, team_name TEXT, round_id TEXT, round_name TEXT, question INTEGER, answer TEXT, points REAL, PRIMARY KEY (team_id, round_id, question))");
+      d.run("CREATE TABLE solutions (round_id TEXT, question INTEGER, solution TEXT, PRIMARY KEY (round_id, question))");
+      var name = function (arr, id) { var x = arr.find(function (y) { return y.id === id; }); return x ? x.name : null; };
+      Object.keys(model.items).forEach(function (c) {
+        Object.keys(model.items[c]).forEach(function (id) { d.run("INSERT INTO items VALUES (?,?,?)", [c, id, JSON.stringify(model.items[c][id])]); });
+      });
+      Object.keys(model.answers).forEach(function (k) {
+        var a = model.answers[k];
+        d.run("INSERT INTO answers VALUES (?,?,?,?,?,?,?)", [a.team_id, name(state.teams, a.team_id), a.round_id, name(state.rounds, a.round_id), a.question, a.answer, a.points]);
+      });
+      Object.keys(model.solutions).forEach(function (k) {
+        var s = model.solutions[k]; d.run("INSERT INTO solutions VALUES (?,?,?)", [s.round_id, s.question, s.solution]);
+      });
+      download(new Blob([d.export()], { type: "application/vnd.sqlite3" }), "braintap-" + new Date().toISOString().slice(0, 10) + ".sqlite");
+      d.close();
+    }).catch(function (err) { alert("Export fehlgeschlagen: " + err.message); });
+  });
+  byId("dbImport").addEventListener("change", function (e) {
+    var f = e.target.files[0]; if (!f) return;
+    Promise.all([loadSql(), f.arrayBuffer()]).then(function (r) {
+      var d = new r[0].Database(new Uint8Array(r[1]));
+      var rows = function (sql) { try { var res = d.exec(sql)[0]; return res ? res.values : []; } catch (err) { return []; } };
+      var ops = [];
+      rows("SELECT collection, id, data FROM items").forEach(function (x) { ops.push({ op: "put", collection: x[0], id: x[1], data: JSON.parse(x[2]) }); });
+      rows("SELECT team_id, round_id, question, answer, points FROM answers").forEach(function (x) {
+        ops.push({ op: "put", collection: "answers", id: answerId(x[0], x[1], x[2]), data: { team_id: x[0], round_id: x[1], question: x[2], answer: x[3], points: x[4] } });
+      });
+      rows("SELECT round_id, question, solution FROM solutions").forEach(function (x) {
+        ops.push({ op: "put", collection: "solutions", id: solutionId(x[0], x[1]), data: { round_id: x[0], question: x[1], solution: x[2] } });
+      });
+      d.close();
+      if (!ops.length) throw new Error("Keine BrainTap-Daten in der Datei");
+      if (!confirm(ops.length + " Einträge importieren und auf dem Server speichern? Gleiche Einträge werden überschrieben.")) return;
+      applyAndQueue(ops); rebuild(); renderAll();
+    }).catch(function (err) { alert("Import fehlgeschlagen: " + err.message); });
+    e.target.value = "";
+  });
+
+  /* ---------- Derived values (no input re-render, keeps focus) ---------- */
   function renderDerived() {
     var total = 0;
     state.rounds.forEach(function (r) {
@@ -710,8 +1115,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     byId("roundTotal").textContent = total + " min";
     renderRunOfShow();
 
-    var list = totals(null);
-    list.forEach(function (x) {
+    totals(null).forEach(function (x) {
       var tc = document.querySelector('[data-total="' + x.team.id + '"]'); if (tc) tc.textContent = x.total;
       var rc = document.querySelector('[data-rank="' + x.team.id + '"]'); if (rc) rc.textContent = x.rank + ".";
       var tr = document.querySelector('tr[data-team="' + x.team.id + '"]'); if (tr) tr.classList.toggle("rank1", x.rank === 1 && x.total > 0);
@@ -754,13 +1158,12 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
     }
   }
 
-  /* Beamer view */
+  /* ---------- Beamer view ---------- */
   function renderBeamer() {
     var idx = upToIndex();
-    var list = totals(idx);
     byId("beamerTitle").textContent = idx == null ? "Zwischenstand" : "Stand nach Runde " + (idx + 1);
     var ol = byId("beamerList"); ol.innerHTML = "";
-    list.forEach(function (x) {
+    totals(idx).forEach(function (x) {
       ol.appendChild(el("li", null, [el("span", { class: "pos" }, [x.rank + "."]), el("span", null, [x.team.name]), el("span", { class: "pts" }, [String(x.total)])]));
     });
   }
@@ -775,200 +1178,60 @@ footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   byId("closeBeamer").addEventListener("click", closeBeamer);
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeBeamer(); });
 
-  /* Countdown */
   function renderCountdown() {
     var days = Math.round((EVENT_DATE - today()) / 86400000);
     byId("daysLeft").textContent = days > 0 ? days : days === 0 ? "Heute!" : "vorbei";
   }
 
-  /* Export / import / reset */
+  /* ---------- JSON export / import ---------- */
   byId("exportBtn").addEventListener("click", function () {
-    var blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-    var a = el("a", { href: URL.createObjectURL(blob), download: "braintap-planung-" + new Date().toISOString().slice(0, 10) + ".json" });
-    document.body.appendChild(a); a.click(); a.remove();
+    var data = { version: 2, exportedAt: new Date().toISOString(), items: model.items, answers: model.answers, solutions: model.solutions };
+    download(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), "braintap-planung-" + new Date().toISOString().slice(0, 10) + ".json");
   });
   byId("importFile").addEventListener("change", function (e) {
     var f = e.target.files[0]; if (!f) return;
     f.text().then(function (txt) {
-      var data = JSON.parse(txt);
-      if (!data || !Array.isArray(data.tasks) || !Array.isArray(data.rounds)) throw new Error("Unbekanntes Format");
-      state = Object.assign(defaults(), data); save(); renderAll();
+      var data = JSON.parse(txt), ops = [];
+      if (data && data.version === 2 && data.items) {
+        Object.keys(data.items).forEach(function (c) { Object.keys(data.items[c]).forEach(function (id) { ops.push({ op: "put", collection: c, id: id, data: data.items[c][id] }); }); });
+        Object.keys(data.answers || {}).forEach(function (id) { ops.push({ op: "put", collection: "answers", id: id, data: data.answers[id] }); });
+        Object.keys(data.solutions || {}).forEach(function (id) { ops.push({ op: "put", collection: "solutions", id: id, data: data.solutions[id] }); });
+      } else if (data && Array.isArray(data.tasks) && Array.isArray(data.rounds)) {
+        ops = stateToOps(data, "put");
+      } else {
+        throw new Error("Unbekanntes Format");
+      }
+      if (!confirm(ops.length + " Einträge importieren und auf dem Server speichern? Gleiche Einträge werden überschrieben.")) return;
+      applyAndQueue(ops); rebuild(); renderAll();
     }).catch(function (err) { alert("Import fehlgeschlagen: " + err.message); });
     e.target.value = "";
   });
   byId("printBtn").addEventListener("click", function () { window.print(); });
-  byId("resetBtn").addEventListener("click", function () {
-    if (!confirm("Alle Eingaben löschen und Vorlage wiederherstellen?")) return;
-    state = defaults(); save(); renderAll();
-  });
-
-  /* Answers database (SQLite via sql.js, persisted in IndexedDB) */
-  var db = null, dbSaveTimer = null;
-  var SOLUTIONS = "__solutions__";
-  function idb(mode, fn) {
-    return new Promise(function (resolve, reject) {
-      var req = indexedDB.open("braintap", 1);
-      req.onupgradeneeded = function () { req.result.createObjectStore("files"); };
-      req.onerror = function () { reject(req.error); };
-      req.onsuccess = function () {
-        var tx = req.result.transaction("files", mode);
-        var r = fn(tx.objectStore("files"));
-        tx.oncomplete = function () { resolve(r && r.result); };
-        tx.onerror = function () { reject(tx.error); };
-      };
-    });
-  }
-  function persistDb() {
-    clearTimeout(dbSaveTimer);
-    dbSaveTimer = setTimeout(function () {
-      var bytes = db.export();
-      idb("readwrite", function (s) { return s.put(bytes, "answers.sqlite"); })
-        .then(function () { setSaveState("Datenbank gespeichert"); })
-        .catch(function () { setSaveState("Datenbank nicht gespeichert – bitte exportieren"); });
-    }, 300);
-  }
-  function migrate() {
-    db.run("CREATE TABLE IF NOT EXISTS answers (" +
-      "team_id TEXT NOT NULL, team_name TEXT, round_id TEXT NOT NULL, round_name TEXT, question INTEGER NOT NULL," +
-      "answer TEXT, points REAL, updated_at TEXT NOT NULL DEFAULT (datetime('now'))," +
-      "PRIMARY KEY (team_id, round_id, question))");
-    db.run("CREATE TABLE IF NOT EXISTS solutions (" +
-      "round_id TEXT NOT NULL, question INTEGER NOT NULL, solution TEXT, PRIMARY KEY (round_id, question))");
-  }
-  function q(sql, params) {
-    var stmt = db.prepare(sql); stmt.bind(params || []);
-    var rows = []; while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free(); return rows;
-  }
-  function selectedRound() { return state.rounds.find(function (r) { return r.id === byId("ansRound").value; }); }
-  function selectedTeam() { return byId("ansTeam").value; }
-
-  function syncRoundScore(teamId, roundId) {
-    var rows = q("SELECT COUNT(points) AS n, SUM(points) AS s FROM answers WHERE team_id = ? AND round_id = ?", [teamId, roundId]);
-    if (!rows[0].n) return;
-    state.scores[teamId] = state.scores[teamId] || {};
-    state.scores[teamId][roundId] = rows[0].s;
-    save(); renderScores();
-  }
-
-  function renderAnswerSelectors() {
-    if (!db) return;
-    var rs = byId("ansRound"), ts = byId("ansTeam");
-    var prevR = rs.value, prevT = ts.value;
-    rs.innerHTML = ""; ts.innerHTML = "";
-    state.rounds.forEach(function (r, i) { rs.appendChild(el("option", { value: r.id, text: (i + 1) + " – " + r.name })); });
-    ts.appendChild(el("option", { value: SOLUTIONS, text: "– Lösungen eintragen –" }));
-    state.teams.forEach(function (t) { ts.appendChild(el("option", { value: t.id, text: t.name })); });
-    if (prevR && state.rounds.some(function (r) { return r.id === prevR; })) rs.value = prevR;
-    if (prevT && (prevT === SOLUTIONS || state.teams.some(function (t) { return t.id === prevT; }))) ts.value = prevT;
-    else if (state.teams.length) ts.value = state.teams[0].id;
-    renderAnswerGrid();
-  }
-
-  function renderAnswerGrid() {
-    var tb = byId("ansBody"); tb.innerHTML = "";
-    var round = selectedRound(); if (!round) { byId("ansSum").textContent = ""; return; }
-    var teamId = selectedTeam(), isSol = teamId === SOLUTIONS;
-    var team = state.teams.find(function (t) { return t.id === teamId; });
-    byId("ansAnswerHead").textContent = isSol ? "–" : "Antwort";
-    var sols = {}; q("SELECT question, solution FROM solutions WHERE round_id = ?", [round.id]).forEach(function (r) { sols[r.question] = r.solution; });
-    var ans = {}; if (!isSol) q("SELECT question, answer, points FROM answers WHERE team_id = ? AND round_id = ?", [teamId, round.id]).forEach(function (r) { ans[r.question] = r; });
-
-    function upsertAnswer(n, field, value) {
-      var cur = ans[n] || { answer: null, points: null };
-      cur[field] = value; ans[n] = cur;
-      db.run("INSERT INTO answers (team_id, team_name, round_id, round_name, question, answer, points, updated_at) VALUES (?,?,?,?,?,?,?,datetime('now')) " +
-        "ON CONFLICT(team_id, round_id, question) DO UPDATE SET answer = excluded.answer, points = excluded.points, team_name = excluded.team_name, round_name = excluded.round_name, updated_at = excluded.updated_at",
-        [teamId, team ? team.name : "", round.id, round.name, n, cur.answer, cur.points]);
-      persistDb(); updateSum(); if (field === "points") syncRoundScore(teamId, round.id);
-    }
-    function updateSum() {
-      if (isSol) { byId("ansSum").textContent = ""; return; }
-      var s = 0; Object.keys(ans).forEach(function (k) { s += Number(ans[k].points) || 0; });
-      byId("ansSum").textContent = String(s);
-      byId("dbCount").textContent = q("SELECT COUNT(*) AS n FROM answers")[0].n + " Antworten gespeichert";
-    }
-
-    for (var n = 1; n <= (Number(round.questions) || 0); n++) {
-      (function (n) {
-        var solCell = isSol
-          ? el("input", { type: "text", value: sols[n] || "", "aria-label": "Lösung " + n, oninput: function (e) {
-              db.run("INSERT INTO solutions (round_id, question, solution) VALUES (?,?,?) ON CONFLICT(round_id, question) DO UPDATE SET solution = excluded.solution", [round.id, n, e.target.value]);
-              persistDb();
-            } })
-          : el("span", { class: "small muted" }, [sols[n] || "–"]);
-        var row = el("tr", null, [el("td", { class: "num" }, [String(n)]), el("td", null, [solCell])]);
-        if (isSol) {
-          row.appendChild(el("td")); row.appendChild(el("td")); row.appendChild(el("td", { class: "noprint" }));
-        } else {
-          var a = ans[n] || {};
-          var pts = el("input", { type: "number", step: "0.5", value: a.points == null ? "" : a.points, "aria-label": "Punkte Frage " + n, oninput: function (e) {
-            upsertAnswer(n, "points", e.target.value === "" ? null : Number(e.target.value));
-          } });
-          row.appendChild(el("td", null, [el("input", { type: "text", value: a.answer || "", "aria-label": "Antwort Frage " + n, oninput: function (e) { upsertAnswer(n, "answer", e.target.value); } })]));
-          row.appendChild(el("td", { class: "num" }, [pts]));
-          row.appendChild(el("td", { class: "noprint" }, [
-            el("button", { class: "icon", title: "Richtig (1 Punkt)", "aria-label": "Frage " + n + " richtig", onclick: function () { pts.value = 1; upsertAnswer(n, "points", 1); } }, ["✓"]),
-            el("button", { class: "icon", title: "Falsch (0 Punkte)", "aria-label": "Frage " + n + " falsch", onclick: function () { pts.value = 0; upsertAnswer(n, "points", 0); } }, ["✗"])
-          ]));
-        }
-        tb.appendChild(row);
-      })(n);
-    }
-    updateSum();
-    byId("ansAllCorrect").disabled = isSol;
-    byId("ansAllCorrect").onclick = function () {
-      for (var k = 1; k <= round.questions; k++) if (!ans[k] || ans[k].points == null) upsertAnswer(k, "points", 0);
-      renderAnswerGrid();
-    };
-  }
-  byId("ansRound").addEventListener("change", renderAnswerGrid);
-  byId("ansTeam").addEventListener("change", renderAnswerGrid);
-  byId("dbExport").addEventListener("click", function () {
-    var blob = new Blob([db.export()], { type: "application/vnd.sqlite3" });
-    var a = el("a", { href: URL.createObjectURL(blob), download: "braintap-antworten-" + new Date().toISOString().slice(0, 10) + ".sqlite" });
-    document.body.appendChild(a); a.click(); a.remove();
-  });
-  byId("dbImport").addEventListener("change", function (e) {
-    var f = e.target.files[0]; if (!f) return;
-    f.arrayBuffer().then(function (buf) {
-      var next = new window.__SQL.Database(new Uint8Array(buf));
-      next.exec("SELECT 1 FROM answers LIMIT 1");
-      if (!confirm("Aktuelle Antwort-Datenbank durch die importierte Datei ersetzen?")) { next.close(); return; }
-      db.close(); db = next; migrate(); persistDb();
-      q("SELECT DISTINCT team_id, round_id FROM answers").forEach(function (r) {
-        if (state.teams.some(function (t) { return t.id === r.team_id; })) syncRoundScore(r.team_id, r.round_id);
-      });
-      renderAnswerSelectors();
-    }).catch(function (err) { alert("Import fehlgeschlagen: " + err.message); });
-    e.target.value = "";
-  });
-
-  function initDb() {
-    if (typeof window.initSqlJs !== "function") { byId("dbStatus").textContent = "SQLite konnte nicht geladen werden (vendor/sqljs fehlt)."; return; }
-    window.initSqlJs({ locateFile: function (f) { return "vendor/sqljs/" + f; } }).then(function (SQL) {
-      window.__SQL = SQL;
-      return idb("readonly", function (s) { return s.get("answers.sqlite"); })
-        .catch(function () { return null; })
-        .then(function (bytes) {
-          db = bytes ? new SQL.Database(bytes) : new SQL.Database();
-          migrate();
-          byId("dbStatus").hidden = true; byId("answerUi").hidden = false;
-          renderAnswerSelectors();
-        });
-    }).catch(function (err) {
-      byId("dbStatus").textContent = "SQLite nicht verfügbar: " + err.message + ". Die Seite muss über einen Webserver laufen (z. B. python3 -m http.server), nicht als file://.";
-    });
-  }
 
   function renderAll() {
     document.querySelectorAll("[data-meta]").forEach(function (inp) { inp.value = state.meta[inp.dataset.meta] != null ? state.meta[inp.dataset.meta] : ""; });
     renderRoles(); renderDecisions(); renderTasks(); renderRounds(); renderTech(); renderTeams(); renderScores(); renderCountdown(); renderAnswerSelectors();
   }
+
+  /* ---------- Start ---------- */
+  var cached = readStorage(CACHE_KEY);
+  outbox = readStorage(OUTBOX_KEY) || [];
+  outbox.forEach(function (o) { lastTs = Math.max(lastTs, o.ts); });
+  if (cached && cached.items) {
+    model = { items: cached.items, answers: cached.answers || {}, solutions: cached.solutions || {} };
+  } else {
+    // Nothing cached yet: show the template right away; the first pull replaces
+    // it with the server state, or seeds an empty server with it.
+    stateToOps(readStorage(LEGACY_KEY) || TEMPLATE, "seed").forEach(function (o) { applyOp(model, o); });
+  }
+  rebuild();
   renderAll();
-  initDb();
-  try { var tab = localStorage.getItem(STORAGE_KEY + "-tab"); if (tab && byId("panel-" + tab)) showTab(tab); } catch (e) { /* ignore */ }
+  updateSyncState();
+  try { var tab = localStorage.getItem(TAB_KEY); if (tab && byId("panel-" + tab)) showTab(tab); } catch (e) { /* ignore */ }
+  pull().then(flush);
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () { /* offline reload unavailable */ });
 })();
 </script>
+
 </body>
 </html>
