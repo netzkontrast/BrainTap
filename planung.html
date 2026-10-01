@@ -167,6 +167,8 @@ input.due { font-size: .8rem; padding: 2px 4px; }
 .feed .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .feed .when { color: var(--muted); font-size: .78rem; white-space: nowrap; }
 .err { color: var(--warn); min-height: 1.2em; margin: 0 0 8px; }
+a.sso { display: block; text-align: center; text-decoration: none; margin: 4px 0 12px; padding: 10px; }
+a.sso[hidden] { display: none; }
 .qlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .q { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--surface); }
 .q.fertig { border-left: 4px solid var(--ok); }
@@ -517,14 +519,17 @@ input.due { font-size: .8rem; padding: 2px 4px; }
 <div id="login" class="overlay" hidden>
   <form class="card login" id="loginForm">
     <h2>Anmelden</h2>
-    <p class="muted small">Gemeinsames Passwort des Orga-Teams. Danach werden alle Änderungen auf dem Server gespeichert.</p>
+    <a class="btn primary sso" id="ssoLogin" href="api/oidc-login" hidden>Mit Auth0 anmelden</a>
+    <p class="muted small" id="pwIntro">Gemeinsames Passwort des Orga-Teams. Danach werden alle Änderungen auf dem Server gespeichert.</p>
+    <div id="pwFields">
     <label class="small" for="loginName">Dein Name (für „Letzte Änderungen“)</label>
     <input type="text" id="loginName" autocomplete="nickname" maxlength="40" required>
     <label class="small" for="loginPw">Passwort</label>
     <input type="password" id="loginPw" autocomplete="current-password" required>
+    </div>
     <p class="small err" id="loginErr" role="alert"></p>
     <div class="row">
-      <button class="btn primary" type="submit">Anmelden</button>
+      <button class="btn primary" type="submit" id="pwSubmit">Anmelden</button>
       <button class="btn" type="button" id="loginLater">Später</button>
     </div>
   </form>
@@ -822,7 +827,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
       var steps = [];
       if (h.storage === "none") steps.push("Speicher anlegen: Vercel → Projekt braintap → Storage → Create → Blob (mit dem Projekt verbinden)");
       else if (h.database !== "ok") steps.push("Datenbank meldet: " + h.database);
-      if (!/gesetzt/.test(h.password)) steps.push("Passwort setzen: Settings → Environment Variables → ORGA_PASSWORD");
+      if (!/gesetzt/.test(h.password) && !/OIDC/.test(h.login || "")) steps.push("Login einrichten: ORGA_PASSWORD oder Auth0 (AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, AUTH_ALLOWED_EMAILS, AUTH_SECRET) unter Settings → Environment Variables");
       if (!steps.length) return;
       var n = byId("notice");
       n.textContent = "Server noch nicht eingerichtet, bis dahin wird nur in diesem Browser gespeichert. " + steps.join(" · ") + " · danach neu deployen.";
@@ -952,10 +957,30 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   }
 
   /* ---------- Login ---------- */
+  // Offer whatever the server supports: provider login (Auth0/OIDC) and/or the
+  // shared password. With only a provider, the password form disappears.
   function showLogin() {
     byId("login").hidden = false; byId("loginName").value = myName(); updateSyncState();
-    setTimeout(function () { byId(myName() ? "loginPw" : "loginName").focus(); }, 0);
+    api("api/session", { method: "GET" }).then(function (r) { return r.json(); }).then(function (s) {
+      var m = s.methods || {};
+      byId("ssoLogin").hidden = !m.oidc;
+      var pw = m.password || !m.oidc;
+      ["pwIntro", "pwFields", "pwSubmit"].forEach(function (id) { byId(id).hidden = !pw; });
+      byId("loginName").required = pw; byId("loginPw").required = pw;
+      if (m.oidc && !pw) byId("ssoLogin").focus(); else byId(myName() ? "loginPw" : "loginName").focus();
+    }).catch(function () { byId(myName() ? "loginPw" : "loginName").focus(); });
   }
+  // After a provider login the account name is the author name.
+  function adoptAccountName() {
+    return api("api/session", { method: "GET" }).then(function (r) { return r.json(); }).then(function (s) {
+      if (s.user && s.user.name) { setMyName(s.user.name); byId("myName").value = myName(); }
+    }).catch(function () { /* offline */ });
+  }
+  (function () {
+    var q = new URLSearchParams(location.search), err = q.get("login_error");
+    if (q.has("login_error")) history.replaceState(null, "", location.pathname);
+    if (err) setTimeout(function () { showLogin(); byId("loginErr").textContent = err; }, 0);
+  })();
   byId("loginForm").addEventListener("submit", function (e) {
     e.preventDefault();
     byId("loginErr").textContent = "";
@@ -2090,7 +2115,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   updateSyncState();
   try { var tab = localStorage.getItem(TAB_KEY); if (tab && byId("panel-" + tab)) showTab(tab); } catch (e) { /* ignore */ }
   byId("myName").value = myName();
-  pull().then(flush).then(loadHistory).then(migrateLegacyAnswers);
+  pull().then(function () { if (auth === "ok") return adoptAccountName(); }).then(flush).then(loadHistory).then(migrateLegacyAnswers);
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () { /* offline reload unavailable */ });
 })();
 </script>

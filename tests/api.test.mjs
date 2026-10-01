@@ -262,15 +262,22 @@ describe("robustness and sessions", () => {
   test("session tokens carry an expiry and expired ones are rejected", async () => {
     const { sessionToken } = await import("../api/_lib.js")
     const fresh = sessionToken()
-    assert.notEqual(fresh, sessionToken(Date.now() - 1000), "token depends on its expiry")
-    const expired = sessionToken(Date.now() - 1000)
+    assert.notEqual(fresh, sessionToken("orga", Date.now() - 1000), "token depends on its expiry")
+    const expired = sessionToken("orga", Date.now() - 1000)
     const res = await state(new Request(base + "/api/state", { headers: { cookie: "bt_auth=" + expired } }))
     assert.equal(res.status, 401)
   })
 
+  test("a token with a swapped subject is rejected", async () => {
+    const [exp, , sig] = decodeURIComponent(cookie.split("=")[1]).split(".")
+    const forged = exp + "." + Buffer.from("boss@example.com").toString("base64url") + "." + sig
+    const res = await state(new Request(base + "/api/state", { headers: { cookie: "bt_auth=" + forged } }))
+    assert.equal(res.status, 401)
+  })
+
   test("a token with a tampered expiry is rejected", async () => {
-    const [, sig] = cookie.split("=")[1].split(".")
-    const forged = (Date.now() + 10 ** 12) + "." + sig
+    const [, sub, sig] = decodeURIComponent(cookie.split("=")[1]).split(".")
+    const forged = (Date.now() + 10 ** 12) + "." + sub + "." + sig
     const res = await state(new Request(base + "/api/state", { headers: { cookie: "bt_auth=" + forged } }))
     assert.equal(res.status, 401)
   })

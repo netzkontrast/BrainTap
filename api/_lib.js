@@ -165,23 +165,65 @@ function password() {
   return pw
 }
 
-// "<expiry ms>.<hmac>": the expiry is part of the signed message, so it can't
-// be extended by hand. Tokens are stateless; changing ORGA_PASSWORD revokes
-// every session at once.
-export function sessionToken(expiresAt = Date.now() + COOKIE_MAX_AGE * 1000) {
-  const sig = createHmac("sha256", password())
-    .update(`braintap-session-v2|${expiresAt}`)
-    .digest("hex")
-  return `${expiresAt}.${sig}`
+// Login methods: the shared organiser password and/or an OIDC provider such
+// as Auth0. Sessions of both kinds are signed with AUTH_SECRET (falling back
+// to ORGA_PASSWORD); rotating it signs everybody out.
+export function oidcConfig() {
+  const domain = process.env.AUTH0_DOMAIN
+  const clientId = process.env.AUTH0_CLIENT_ID
+  const clientSecret = process.env.AUTH0_CLIENT_SECRET
+  if (!domain || !clientId || !clientSecret) {
+    return null
+  }
+  const issuer = domain.startsWith("http") ? domain.replace(/\/?$/, "/") : `https://${domain}/`
+  return { issuer, clientId, clientSecret }
 }
 
-function validToken(token) {
-  const [exp, sig] = String(token).split(".")
-  const expiresAt = Number(exp)
-  if (!sig || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) {
-    return false
+export function loginMethods() {
+  return { password: Boolean(process.env.ORGA_PASSWORD), oidc: Boolean(oidcConfig()) }
+}
+
+export function allowedEmails() {
+  return (process.env.AUTH_ALLOWED_EMAILS ?? "")
+    .split(/[,\s]+/)
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+function secret() {
+  const s = process.env.AUTH_SECRET || process.env.ORGA_PASSWORD
+  if (!s) {
+    throw new HttpError(503, "Weder ORGA_PASSWORD noch AUTH_SECRET ist gesetzt")
   }
-  return safeEqual(token, sessionToken(expiresAt))
+  return s
+}
+
+export function sign(message) {
+  return createHmac("sha256", secret()).update(message).digest("hex")
+}
+
+const b64 = (s) => Buffer.from(s, "utf8").toString("base64url")
+const unb64 = (s) => Buffer.from(s, "base64url").toString("utf8")
+
+// "<expiry ms>.<base64url subject>.<hmac>": expiry and subject are signed, so
+// neither can be changed by hand. Tokens are stateless.
+export function sessionToken(subject = "orga", expiresAt = Date.now() + COOKIE_MAX_AGE * 1000) {
+  const body = `${expiresAt}.${b64(subject)}`
+  return `${body}.${sign(`braintap-session-v3|${body}`)}`
+}
+
+function readToken(token) {
+  const parts = String(token).split(".")
+  if (parts.length !== 3) return null
+  const [exp, sub, sig] = parts
+  const expiresAt = Number(exp)
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) return null
+  if (!safeEqual(sig, sign(`braintap-session-v3|${exp}.${sub}`))) return null
+  try {
+    return { subject: unb64(sub) }
+  } catch {
+    return null
+  }
 }
 
 function safeEqual(a, b) {
@@ -209,16 +251,28 @@ function readCookie(request, name) {
   return null
 }
 
-export function requireAuth(request) {
+export { readCookie }
+
+export function session(request) {
   const token = readCookie(request, COOKIE)
-  if (!token || !validToken(token)) {
+  return token ? readToken(token) : null
+}
+
+export function requireAuth(request) {
+  const s = session(request)
+  if (!s) {
     throw new HttpError(401, "Nicht angemeldet")
   }
+  return s
+}
+
+export function cookie(name, value, { maxAge, sameSite = "Strict", path = "/" }) {
+  const secure = process.env.VERCEL ? "; Secure" : ""
+  return `${name}=${encodeURIComponent(value)}; Path=${path}; HttpOnly; SameSite=${sameSite}; Max-Age=${maxAge}${secure}`
 }
 
 export function sessionCookie(value, maxAge = COOKIE_MAX_AGE) {
-  const secure = process.env.VERCEL ? "; Secure" : ""
-  return `${COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`
+  return cookie(COOKIE, value, { maxAge })
 }
 
 export async function readJson(request) {

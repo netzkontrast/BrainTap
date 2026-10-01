@@ -1,4 +1,4 @@
-import { db, handle, json, storageKind } from "./_lib.js"
+import { db, handle, json, loginMethods, storageKind } from "./_lib.js"
 
 // Public setup check: says which storage is configured and whether it works,
 // never any planning data.
@@ -13,10 +13,12 @@ export const GET = handle(async () => {
       database = "Fehler: " + (err?.message ?? "unbekannt")
     }
   }
+  const methods = loginMethods()
   return json({
-    status: database === "ok" && process.env.ORGA_PASSWORD ? "ok" : "setup",
+    status: database === "ok" && (methods.password || methods.oidc) ? "ok" : "setup",
     storage,
     database,
-    password: process.env.ORGA_PASSWORD ? "gesetzt" : "fehlt (ORGA_PASSWORD)",
+    password: methods.password ? "gesetzt" : "fehlt (ORGA_PASSWORD)",
+    login: methods.oidc ? "Auth0/OIDC" : methods.password ? "Passwort" : "keiner eingerichtet",
   })
 })

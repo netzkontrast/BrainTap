@@ -21,7 +21,7 @@ const types = {
 createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${port}`)
 
-  const api = url.pathname.match(/^\/api\/([a-z]+)$/)
+  const api = url.pathname.match(/^\/api\/([a-z][a-z-]*)$/)
   if (api) {
     const file = join(root, "api", `${api[1]}.js`)
     const mod = existsSync(file) ? await import(file) : {}
@@ -34,7 +34,10 @@ createServer(async (req, res) => {
     for await (const c of req) chunks.push(c)
     const body = chunks.length ? Buffer.concat(chunks) : undefined
     const response = await fn(new Request(url, { method: req.method, headers: req.headers, body }))
-    res.writeHead(response.status, Object.fromEntries(response.headers))
+    const headers = Object.fromEntries(response.headers)
+    const cookies = response.headers.getSetCookie()
+    if (cookies.length) headers["set-cookie"] = cookies
+    res.writeHead(response.status, headers)
     res.end(Buffer.from(await response.arrayBuffer()))
     return
   }
