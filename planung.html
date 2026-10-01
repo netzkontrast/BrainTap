@@ -2156,12 +2156,12 @@ a.sso[hidden] { display: none; }
     byId("spUrl").textContent = location.origin + location.pathname.replace(/[^/]*$/, "") + "speed.html";
   }
   function speedCall(body) {
-    if (speed.busy) return Promise.resolve();
+    if (speed.busy) return Promise.resolve(false);
     speed.busy = true; byId("spMsg").textContent = "";
     return api("api/speed", { method: "POST", body: JSON.stringify(body) }).then(function (res) {
       return res.json().then(function (j) { if (!res.ok) throw new Error(j.error || "HTTP " + res.status); return j; });
-    }).then(function (j) { speedApply(j); if (/close|reveal|end|score/.test(body.action)) pull(); })
-      .catch(function (err) { byId("spMsg").textContent = err.message; })
+    }).then(function (j) { speedApply(j); if (/close|reveal|end|score/.test(body.action)) pull(); return true; })
+      .catch(function (err) { byId("spMsg").textContent = err.message; return false; })
       .finally(function () { speed.busy = false; });
   }
   function speedPoll() {
@@ -2197,7 +2197,8 @@ a.sso[hidden] { display: none; }
     var payload;
     try { payload = speedPayload(round, n); } catch (err) { byId("spMsg").textContent = err.message; return; }
     var go = function () { return speedCall(Object.assign({ action: "show", n: n, secs: Number(byId("spSecs").value) || Number(round.secs) || 20 }, payload)); };
-    if (sameRound) go(); else speedCall({ action: "open", roundId: round.id, roundName: round.name, of: of }).then(go);
+    if (sameRound) go();
+    else speedCall({ action: "open", roundId: round.id, roundName: round.name, of: of }).then(function (ok) { if (ok) go(); });
   }
   function speedApply(j) {
     speed.data = j;

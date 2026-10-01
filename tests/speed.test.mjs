@@ -172,10 +172,33 @@ describe("speed round", () => {
     assert.equal(got.filter((a) => a.points === 1).length, 3, "teams 1, 5 and 9 chose B")
   })
 
+  test("a team row's id wins over an id stored inside its data", async () => {
+    const ops = [{ op: "put", collection: "teams", id: "real", base: 0, data: { id: "fake", pos: 50, name: "Echtes Team" } }]
+    assert.equal((await sync(req("/api/sync", { cookie: orga, body: { ops, by: "Test" } }))).status, 200)
+    const o = await orgaDo({ action: "close" })
+    const t = o.body.teams.find((x) => x.name === "Echtes Team")
+    assert.equal(t.id, "real")
+    assert.equal(t.code, teamCode("real"))
+    const view = await teamGet(await joinAs("real"))
+    assert.equal(view.body.team.name, "Echtes Team")
+  })
+
   test("orga actions require a login and validate input", async () => {
     const res = await speedPost(req("/api/speed", { body: { action: "open", roundId: "r1" } }))
     assert.equal(res.status, 401)
     assert.equal((await orgaDo({ action: "show", n: 1, secs: 10, question: { kind: "mc", text: "x", options: ["nur eine"] } })).status, 400)
     assert.equal((await orgaDo({ action: "kaputt" })).status, 400)
+  })
+
+  // Last on purpose: it locks joining for a minute.
+  test("parallel guessing hits a global limit of join attempts", async () => {
+    const guess = (code) => speedPost(req("/api/speed", { body: { action: "join", code } })).then((r) => r.status)
+    // One burst far beyond the limit: each attempt is counted before it is checked.
+    const statuses = await Promise.all(Array.from({ length: 90 }, (_, i) => guess("Q" + String(i).padStart(4, "0"))))
+    const checked = statuses.filter((s) => s === 404).length
+    assert.ok(checked > 0 && checked <= 60, `${checked} guesses were checked`)
+    assert.ok(statuses.includes(429))
+    assert.equal(await guess("QQQQQ"), 429, "further guesses are refused")
+    assert.equal(await guess(teamCode("t1")), 429, "even a right code is not checked during the lockout")
   })
 })

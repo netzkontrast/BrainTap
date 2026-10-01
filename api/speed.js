@@ -86,7 +86,7 @@ async function readGame(c, extra = []) {
 
 function teamList(rows) {
   return rows
-    .map((row) => ({ id: row.id, ...JSON.parse(row.data) }))
+    .map((row) => ({ ...JSON.parse(row.data), id: row.id }))
     .sort((a, b) => (Number(a.pos) || 0) - (Number(b.pos) || 0))
     .map((t) => ({ id: t.id, name: t.name || "Team" }))
 }
@@ -202,11 +202,31 @@ async function orgaAction(c, body, now) {
 
 /* ---------- Teams ---------- */
 
+// Every join attempt is counted globally in the database before its code is
+// checked, in the same transaction that reads the count back, so guessing in
+// parallel or across function instances cannot slip past the limit.
+const JOIN_WINDOW_MS = 60_000
+const JOIN_MAX_ATTEMPTS = 60
+
 async function join(c, body) {
+  const now = Date.now()
+  const out = await c.batch([
+    {
+      sql: `INSERT INTO speed (key, data) VALUES ('joins', json_object('since', ?, 'count', 1))
+            ON CONFLICT (key) DO UPDATE SET data = CASE
+              WHEN json_extract(data, '$.since') < ? THEN json_object('since', ?, 'count', 1)
+              ELSE json_set(data, '$.count', json_extract(data, '$.count') + 1) END`,
+      args: [now, now - JOIN_WINDOW_MS, now],
+    },
+    "SELECT json_extract(data, '$.count') AS n FROM speed WHERE key = 'joins'",
+  ], "write")
+  if (Number(out[1].rows[0]?.n ?? 0) > JOIN_MAX_ATTEMPTS) {
+    throw new HttpError(429, "Zu viele Anmeldeversuche – bitte eine Minute warten")
+  }
   const code = String(body.code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
   const team = code.length === 5 ? (await teams(c)).find((t) => teamCode(t.id) === code) : null
   if (!team) {
-    await new Promise((r) => setTimeout(r, 400)) // slows down guessing
+    await new Promise((res) => setTimeout(res, 400)) // slows down sequential guessing
     throw new HttpError(404, "Unbekannter Team-Code")
   }
   await c.batch([{
