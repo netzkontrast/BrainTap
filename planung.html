@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8D%BA%3C/text%3E%3C/svg%3E">
 <title>BrainTap Quizplanung</title>
 <style>
 :root {
@@ -813,9 +814,11 @@ input.due { font-size: .8rem; padding: 2px 4px; }
   }
   // Tells whoever opens the page what is still missing on Vercel.
   var setupShown = false;
-  function showSetupHelp() {
-    if (setupShown) return; setupShown = true;
+  function showSetupHelp(attempt) {
+    if (setupShown) return;
+    attempt = attempt || 0;
     api("api/health", { method: "GET" }).then(function (r) { return r.json(); }).then(function (h) {
+      setupShown = true;
       var steps = [];
       if (h.storage === "none") steps.push("Speicher anlegen: Vercel → Projekt braintap → Storage → Create → Blob (mit dem Projekt verbinden)");
       else if (h.database !== "ok") steps.push("Datenbank meldet: " + h.database);
@@ -824,7 +827,7 @@ input.due { font-size: .8rem; padding: 2px 4px; }
       var n = byId("notice");
       n.textContent = "Server noch nicht eingerichtet, bis dahin wird nur in diesem Browser gespeichert. " + steps.join(" · ") + " · danach neu deployen.";
       n.hidden = false;
-    }).catch(function () { /* offline */ });
+    }).catch(function () { if (attempt < 4) setTimeout(function () { showSetupHelp(attempt + 1); }, 2000 * (attempt + 1)); });
   }
   var noticeTimer = null;
   function showNotice(text) {
