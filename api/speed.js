@@ -1,6 +1,7 @@
 import {
   cookie,
   db,
+  demoMode,
   handle,
   HttpError,
   json,
@@ -259,10 +260,14 @@ async function join(c, body) {
     throw new HttpError(429, "Zu viele Anmeldeversuche – bitte eine Minute warten")
   }
   const code = String(body.code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
-  const team = code.length === 5 ? (await teams(c)).find((t) => teamCode(t.id) === code) : null
+  const list = await teams(c)
+  // In demo mode a phone simply picks its team from the list.
+  const team = demoMode() && typeof body.teamId === "string"
+    ? list.find((t) => t.id === body.teamId)
+    : code.length === 5 ? list.find((t) => teamCode(t.id) === code) : null
   if (!team) {
     await new Promise((res) => setTimeout(res, 400)) // slows down sequential guessing
-    throw new HttpError(404, "Unbekannter Team-Code")
+    throw new HttpError(404, demoMode() ? "Unbekanntes Team" : "Unbekannter Team-Code")
   }
   await c.batch([{
     sql: "INSERT INTO speed_joins (team_id, joined_at) VALUES (?, ?) ON CONFLICT (team_id) DO UPDATE SET joined_at = excluded.joined_at",
@@ -358,6 +363,9 @@ export const GET = handle(async (request) => {
     return json(await orgaView(c, now))
   }
   const team = teamSession(request)
+  if (!team && demoMode()) {
+    return json({ error: "Team wählen", demo: true, teams: await teams(c) }, { status: 401 })
+  }
   if (!team) {
     throw new HttpError(401, session(request) ? "Dieses Gerät ist als Orga angemeldet, nicht als Team" : "Bitte Team-Code eingeben")
   }

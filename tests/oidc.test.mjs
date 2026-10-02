@@ -88,7 +88,7 @@ describe("OIDC login (Auth0-compatible)", () => {
     const { GET: who } = await import("../api/session.js")
     const body = await (await who(new Request(base + "/api/session", { headers: { cookie: session } }))).json()
     assert.deepEqual(body.user, { email: "anna@example.com", name: "Anna Orga" })
-    assert.deepEqual(body.methods, { password: false, oidc: true })
+    assert.deepEqual(body.methods, { password: false, oidc: true, demo: false })
   })
 
   test("an account that is not on the list is sent back without a session", async () => {

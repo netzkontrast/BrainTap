@@ -7,6 +7,7 @@ export const GET = handle(async (request) => {
     const s = session(request)
     if (s) {
       try { user = JSON.parse(s.subject) } catch { user = { name: null, email: null } }
+      if (!user || typeof user !== "object") user = { name: null, email: null }
     }
   } catch {
     user = null

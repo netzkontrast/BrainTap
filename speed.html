@@ -192,7 +192,7 @@ body.screen .sol-big { font-size: clamp(1.8rem, 4vw, 4.5rem); font-weight: 800; 
       document.getElementById("offline").hidden = true;
       if (j.httpStatus === 401) {
         data = null;
-        if (SCREEN) renderNeedsOrga(); else if (!joining) { joining = true; renderJoin(); }
+        if (SCREEN) renderNeedsOrga(); else if (!joining) { joining = true; renderJoin(j); }
         return;
       }
       joining = false;
@@ -211,7 +211,36 @@ body.screen .sol-big { font-size: clamp(1.8rem, 4vw, 4.5rem); font-weight: 800; 
   window.addEventListener("online", poll);
 
   /* ---------- Join ---------- */
-  function renderJoin() {
+  function joined() {
+    history.replaceState(null, "", location.pathname);
+    joining = false;
+    view.dataset.key = "";
+    poll();
+  }
+  // Demo mode: no codes, a phone picks its team from the list.
+  function renderPick(teams) {
+    document.getElementById("who").textContent = "";
+    document.getElementById("notice").textContent = "Ein Gerät pro Team.";
+    var status = el("p", { class: "status bad", role: "status" });
+    var buttons = teams.map(function (t) {
+      return el("button", { class: "opt", type: "button", onclick: function () {
+        status.className = "status"; status.textContent = "Melde an …";
+        api("POST", { action: "join", teamId: t.id }).then(function (j) {
+          if (j.httpStatus !== 200) { status.className = "status bad"; status.textContent = j.error || "Hat nicht geklappt"; return; }
+          joined();
+        }).catch(function () { status.className = "status bad"; status.textContent = "Keine Verbindung"; });
+      } }, [el("b", { text: "⚡" }), el("span", { text: t.name })]);
+    });
+    view.replaceChildren(el("div", { class: "card" }, [
+      el("h1", { text: "Welches Team seid ihr?" }),
+      teams.length ? el("div", { class: "options", role: "group", "aria-label": "Teams" }, buttons)
+        : el("p", { class: "muted", text: "Noch keine Teams angelegt. Die Orga legt sie im Planungstool an – diese Seite gleich neu laden." }),
+      status,
+    ]));
+    clearInterval(ticker);
+  }
+  function renderJoin(j) {
+    if (j && j.demo) return renderPick(j.teams || []);
     document.getElementById("who").textContent = "";
     document.getElementById("notice").textContent = "Ein Gerät pro Team. Den Code findet ihr auf eurer Tischkarte.";
     var input = el("input", { class: "field code", id: "code", inputmode: "text", autocomplete: "off", autocapitalize: "characters", spellcheck: "false", maxlength: 7, "aria-label": "Team-Code", placeholder: "•••••", value: params.get("code") || "" });
@@ -223,10 +252,7 @@ body.screen .sol-big { font-size: clamp(1.8rem, 4vw, 4.5rem); font-weight: 800; 
       status.className = "status"; status.textContent = "Prüfe …";
       api("POST", { action: "join", code: code }).then(function (j) {
         if (j.httpStatus !== 200) { status.className = "status bad"; status.textContent = j.error || "Hat nicht geklappt"; return; }
-        history.replaceState(null, "", location.pathname);
-        joining = false;
-        view.dataset.key = "";
-        poll();
+        joined();
       }).catch(function () { status.className = "status bad"; status.textContent = "Keine Verbindung"; });
     } }, [
       el("h1", { text: "Team-Code eingeben" }),

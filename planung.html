@@ -102,6 +102,7 @@ button.icon:hover { color: var(--accent); }
 .tag { font-size: .75rem; border-radius: 4px; padding: 1px 6px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
 .tag.open { color: var(--warn); border-color: var(--warn); }
 .tag.ok { color: var(--ok); border-color: var(--ok); }
+.demo-banner { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); border: 1px solid var(--warn); border-radius: var(--radius); padding: 8px 12px; margin: 0 0 12px; font-size: .9rem; }
 .sp-status { font-size: 1.15rem; font-weight: 650; margin: 6px 0 10px; font-variant-numeric: tabular-nums; }
 .sp-controls { margin-bottom: 12px; }
 .sp-question { background: var(--surface-2); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
@@ -221,6 +222,7 @@ a.sso[hidden] { display: none; }
     </div>
     <div class="countdown"><strong id="daysLeft">–</strong><span>Tage bis zum Quiz</span><p id="syncState" class="sync" role="status" aria-live="polite">Verbinde …</p></div>
   </header>
+  <p id="demoBanner" class="demo-banner" hidden>Demo-Modus: keine Anmeldung, alle mit dem Link können ansehen und ändern. Gelöschtes liegt im Papierkorb; Sicherung als Datei unten mit „Export (JSON)“.</p>
   <p id="notice" class="notice" role="alert" hidden></p>
 
   <div class="chips" aria-label="Rahmenentscheidungen">
@@ -1014,6 +1016,7 @@ a.sso[hidden] { display: none; }
   // After a provider login the account name is the author name.
   function adoptAccountName() {
     return api("api/session", { method: "GET" }).then(function (r) { return r.json(); }).then(function (s) {
+      byId("demoBanner").hidden = !(s.methods && s.methods.demo);
       if (s.user && s.user.name) { setMyName(s.user.name); byId("myName").value = myName(); }
     }).catch(function () { /* offline */ });
   }

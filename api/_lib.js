@@ -198,8 +198,15 @@ export function oidcConfig() {
   return { issuer, clientId, clientSecret }
 }
 
+// Demo mode (DEMO_MODE=1): no login at all, everyone with the link is an
+// organiser and team phones pick their team from a list. Removing the
+// variable brings the password/Auth0 login back unchanged.
+export function demoMode() {
+  return process.env.DEMO_MODE === "1"
+}
+
 export function loginMethods() {
-  return { password: Boolean(process.env.ORGA_PASSWORD), oidc: Boolean(oidcConfig()) }
+  return { password: Boolean(process.env.ORGA_PASSWORD), oidc: Boolean(oidcConfig()), demo: demoMode() }
 }
 
 export function allowedEmails() {
@@ -310,7 +317,8 @@ export { readCookie }
 
 export function session(request) {
   const token = readCookie(request, COOKIE)
-  return token ? readToken(token) : null
+  const s = token ? readToken(token) : null
+  return s ?? (demoMode() ? { subject: "demo" } : null)
 }
 
 export function requireAuth(request) {

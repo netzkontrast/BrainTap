@@ -37,6 +37,8 @@ Alles läuft auf Vercel. Die Datenbank ist eine SQLite-Datei, die als privater *
 | `AUTH_ALLOWED_EMAILS` | Kommagetrennte E-Mail-Adressen, die sich per Auth0 anmelden dürfen (Pflicht für Auth0) |
 | `AUTH_SECRET` | Zufälliger Schlüssel (≥ 32 Zeichen) zum Signieren der Sitzungen; nötig, wenn kein `ORGA_PASSWORD` gesetzt ist |
 
+**Demo-Modus:** Mit `DEMO_MODE=1` entfällt jede Anmeldung – das Planungstool ist für alle mit dem Link offen, Team-Handys wählen ihr Team in der Speed-Runde aus einer Liste. Variable entfernen und neu deployen, dann gelten Passwort bzw. Auth0 wieder.
+
 `/api/health` zeigt ohne Login, ob Speicher und Anmeldung eingerichtet sind. Ist Auth0 eingerichtet, zeigt die Anmeldeseite „Mit Auth0 anmelden“; ohne `ORGA_PASSWORD` entfällt das Passwortfeld.
 
 ### Einrichtung auf Vercel
