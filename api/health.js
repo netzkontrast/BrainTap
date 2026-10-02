@@ -15,10 +15,10 @@ export const GET = handle(async () => {
   }
   const methods = loginMethods()
   return json({
-    status: database === "ok" && (methods.password || methods.oidc) ? "ok" : "setup",
+    status: database === "ok" && (methods.password || methods.oidc || methods.demo) ? "ok" : "setup",
     storage,
     database,
     password: methods.password ? "gesetzt" : "fehlt (ORGA_PASSWORD)",
-    login: methods.oidc ? "Auth0/OIDC" : methods.password ? "Passwort" : "keiner eingerichtet",
+    login: methods.demo ? "Demo (ohne Anmeldung)" : methods.oidc ? "Auth0/OIDC" : methods.password ? "Passwort" : "keiner eingerichtet",
   })
 })

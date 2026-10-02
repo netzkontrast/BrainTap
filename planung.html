@@ -93,6 +93,7 @@ textarea { width: 100%; resize: vertical; }
 input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 button.btn { font: inherit; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
 button.btn:hover { background: var(--surface-2); }
+button.btn:disabled { opacity: .45; cursor: not-allowed; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button.primary:hover { filter: brightness(1.05); background: var(--accent); }
 button.icon { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; padding: 2px 6px; }
@@ -101,6 +102,11 @@ button.icon:hover { color: var(--accent); }
 .tag { font-size: .75rem; border-radius: 4px; padding: 1px 6px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
 .tag.open { color: var(--warn); border-color: var(--warn); }
 .tag.ok { color: var(--ok); border-color: var(--ok); }
+.demo-banner { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); border: 1px solid var(--warn); border-radius: var(--radius); padding: 8px 12px; margin: 0 0 12px; font-size: .9rem; }
+.sp-status { font-size: 1.15rem; font-weight: 650; margin: 6px 0 10px; font-variant-numeric: tabular-nums; }
+.sp-controls { margin-bottom: 12px; }
+.sp-question { background: var(--surface-2); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
+.sp-question .sol { color: var(--ok); font-weight: 600; }
 .tablewrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -216,6 +222,7 @@ a.sso[hidden] { display: none; }
     </div>
     <div class="countdown"><strong id="daysLeft">–</strong><span>Tage bis zum Quiz</span><p id="syncState" class="sync" role="status" aria-live="polite">Verbinde …</p></div>
   </header>
+  <p id="demoBanner" class="demo-banner" hidden>Demo-Modus: keine Anmeldung, alle mit dem Link können ansehen und ändern. Gelöschtes liegt im Papierkorb; Sicherung als Datei unten mit „Export (JSON)“.</p>
   <p id="notice" class="notice" role="alert" hidden></p>
 
   <div class="chips" aria-label="Rahmenentscheidungen">
@@ -234,6 +241,7 @@ a.sso[hidden] { display: none; }
     <button role="tab" data-tab="questions" aria-selected="false">Fragen</button>
     <button role="tab" data-tab="tech" aria-selected="false">Technik</button>
     <button role="tab" data-tab="score" aria-selected="false">Teams &amp; Scoreboard</button>
+    <button role="tab" data-tab="speed" aria-selected="false">Speed-Runde</button>
   </nav>
 
   <!-- ÜBERSICHT -->
@@ -485,11 +493,45 @@ a.sso[hidden] { display: none; }
 
     <div class="card">
       <h2>Punkte pro Runde</h2>
-      <p class="muted small">Papierrunden direkt eintragen. Für die Speed-Runde die Razzia-Punkte umrechnen, z. B. ÷ 100, damit sie zu den Papierrunden passen.</p>
+      <p class="muted small">Papierrunden direkt eintragen. Die Punkte der Speed-Runde kommen automatisch aus dem Tab „Speed-Runde“.</p>
       <div class="tablewrap"><table id="scoreTable"></table></div>
       <div class="row noprint" style="margin-top:12px">
         <label class="small">Stand nach Runde <select id="showUpTo"></select></label>
         <button class="btn primary" id="openBeamer">Beamer-Ansicht öffnen</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- SPEED-RUNDE -->
+  <section class="panel" id="panel-speed" role="tabpanel">
+    <div class="card">
+      <h2>Speed-Runde steuern <span class="tag">live</span></h2>
+      <p class="muted small">Ein Gerät pro Team öffnet <b id="spUrl">speed.html</b> und meldet sich mit dem Team-Code an. Fragen kommen aus der Fragen-Bank der gewählten Runde; der Server misst die Zeit. Multiple Choice und exakt passende Antworten werden automatisch gewertet, die Punkte landen direkt im Scoreboard.</p>
+      <div class="row noprint" style="margin-bottom:10px">
+        <label class="small">Runde <select id="spRound"></select></label>
+        <label class="small">Sekunden pro Frage <input type="number" id="spSecs" min="3" max="600" style="width:5em"></label>
+        <label class="small">Punkte pro richtige Antwort <input type="number" id="spPoints" min="0.5" max="100" step="0.5" value="1" style="width:5em"></label>
+        <label class="small" title="Richtige Antworten bringen je nach Tempo zwischen der Hälfte und allen Punkten"><input type="checkbox" id="spTempo"> Tempo-Punkte</label>
+      </div>
+      <p id="spStatus" class="sp-status" role="status">Noch nicht gestartet</p>
+      <div class="row noprint sp-controls">
+        <button class="btn" id="spOpen">Runde öffnen</button>
+        <button class="btn primary" id="spNext">Erste Frage starten</button>
+        <button class="btn" id="spClose">Zeit stoppen</button>
+        <button class="btn" id="spReveal">Auflösen</button>
+        <button class="btn" id="spEnd">Runde beenden</button>
+        <button class="btn" id="spScreen">Beamer-Ansicht</button>
+      </div>
+      <div id="spQuestion" class="sp-question" hidden></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Team</th><th>Code</th><th>Gerät</th><th>Antwort</th><th class="num">Zeit</th><th class="num">Punkte</th><th class="noprint">Wertung</th><th class="num">Runde</th></tr></thead>
+        <tbody id="spTeams"></tbody>
+      </table></div>
+      <p class="small" id="spFastest"></p>
+      <div class="row noprint" style="margin-top:12px">
+        <button class="btn" id="spCards">Tischkarten mit Codes drucken</button>
+        <button class="btn" id="spReset" title="Spielstand und verbundene Geräte zurücksetzen; Antworten bleiben erhalten">Zurücksetzen</button>
+        <span class="small muted" id="spMsg"></span>
       </div>
     </div>
   </section>
@@ -541,6 +583,7 @@ a.sso[hidden] { display: none; }
   <ol id="beamerList"></ol>
 </div>
 
+<script src="vendor/qrcode/qrcode.js" defer></script>
 <script>
 (function () {
   "use strict";
@@ -940,7 +983,7 @@ a.sso[hidden] { display: none; }
     setTimeout(function () { if (pendingRender && !editing()) { pendingRender = false; pull(); } }, 50);
   });
   setInterval(function () { if (document.visibilityState === "visible") pull(); }, 10000);
-  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") pull(); });
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") { pull(); speedPoll(); } });
   window.addEventListener("online", function () { online = true; flush(); pull(); });
 
   function setSync(text, kind) {
@@ -973,6 +1016,7 @@ a.sso[hidden] { display: none; }
   // After a provider login the account name is the author name.
   function adoptAccountName() {
     return api("api/session", { method: "GET" }).then(function (r) { return r.json(); }).then(function (s) {
+      byId("demoBanner").hidden = !(s.methods && s.methods.demo);
       if (s.user && s.user.name) { setMyName(s.user.name); byId("myName").value = myName(); }
     }).catch(function () { /* offline */ });
   }
@@ -1007,7 +1051,7 @@ a.sso[hidden] { display: none; }
     if (attrs) Object.keys(attrs).forEach(function (k) {
       if (k === "text") n.textContent = attrs[k];
       else if (k.slice(0, 2) === "on") n.addEventListener(k.slice(2), attrs[k]);
-      else if (k === "checked" || k === "value" || k === "selected") n[k] = attrs[k];
+      else if (k === "checked" || k === "value" || k === "selected" || k === "disabled") n[k] = attrs[k];
       else if (attrs[k] != null) n.setAttribute(k, attrs[k]);
     });
     (children || []).forEach(function (c) { if (c != null) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
@@ -1051,6 +1095,7 @@ a.sso[hidden] { display: none; }
     document.querySelectorAll("nav.tabs button").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.tab === name)); });
     document.querySelectorAll("section.panel").forEach(function (p) { p.classList.toggle("active", p.id === "panel-" + name); });
     try { localStorage.setItem(TAB_KEY, name); } catch (e) { /* ignore */ }
+    if (name === "speed") { renderSpeedRounds(); renderSpeed(); speedPoll(); }
   }
 
   /* ---------- Meta inputs ---------- */
@@ -2096,7 +2141,195 @@ a.sso[hidden] { display: none; }
     document.querySelectorAll("[data-meta]").forEach(function (inp) { inp.value = state.meta[inp.dataset.meta] != null ? state.meta[inp.dataset.meta] : ""; });
     document.querySelectorAll("[data-meta-check]").forEach(function (inp) { inp.checked = !!state.meta[inp.dataset.metaCheck]; });
     renderExpenses();
-    renderRoles(); renderDecisions(); renderTasks(); renderRounds(); renderTech(); renderTeams(); renderScores(); renderCountdown(); renderAnswerSelectors(); renderQuestions();
+    renderRoles(); renderDecisions(); renderTasks(); renderRounds(); renderTech(); renderTeams(); renderScores(); renderCountdown(); renderAnswerSelectors(); renderQuestions(); renderSpeedRounds();
+  }
+
+  /* ---------- Speed-Runde ---------- */
+  // Drives api/speed: the server owns the clock and the game state, team
+  // devices poll speed.html. Answers come back through the answers table.
+  var speed = { data: null, timer: null, ticker: null, offset: 0, busy: false };
+  function isSpeedRound(r) { return !!r && /razzia|speed|handy/i.test((r.mode || "") + " " + (r.name || "")); }
+  function speedRound() { return state.rounds.find(function (r) { return r.id === byId("spRound").value; }); }
+  function renderSpeedRounds() {
+    var sel = byId("spRound"), prev = sel.value;
+    sel.innerHTML = "";
+    state.rounds.forEach(function (r, i) { sel.appendChild(el("option", { value: r.id }, [(i + 1) + " – " + r.name])); });
+    var running = speed.data && speed.data.state && speed.data.state.roundId;
+    var pick = [running, prev].filter(function (id) { return id && state.rounds.some(function (r) { return r.id === id; }); })[0] ||
+      (state.rounds.find(isSpeedRound) || state.rounds[0] || {}).id;
+    if (pick) sel.value = pick;
+    var r = speedRound();
+    if (r && document.activeElement !== byId("spSecs")) byId("spSecs").value = Number(r.secs) || 20;
+    byId("spUrl").textContent = location.origin + location.pathname.replace(/[^/]*$/, "") + "speed.html";
+  }
+  function speedCall(body) {
+    if (speed.busy) return Promise.resolve(false);
+    speed.busy = true; byId("spMsg").textContent = "";
+    return api("api/speed", { method: "POST", body: JSON.stringify(body) }).then(function (res) {
+      return res.json().then(function (j) { if (!res.ok) throw new Error(j.error || "HTTP " + res.status); return j; });
+    }).then(function (j) { speedApply(j); if (/close|reveal|end|score/.test(body.action)) pull(); return true; })
+      .catch(function (err) { byId("spMsg").textContent = err.message; return false; })
+      .finally(function () { speed.busy = false; });
+  }
+  function speedPoll() {
+    clearTimeout(speed.timer);
+    if (!byId("panel-speed").classList.contains("active")) return;
+    if (auth !== "ok") { speed.timer = setTimeout(speedPoll, 2000); return; }
+    api("api/speed?view=orga").then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (j) { if (j) speedApply(j); })
+      .catch(function () { /* offline: keep the last view */ })
+      .then(function () {
+        var st = speed.data && speed.data.state;
+        speed.timer = setTimeout(speedPoll, document.visibilityState !== "visible" ? 8000 : st && (st.status === "question" || st.status === "lobby") ? 1500 : 4000);
+      });
+  }
+  function speedPayload(round, n) {
+    var q = slotQuestions(round)[n - 1];
+    if (!q || !(q.text || "").trim()) throw new Error("Frage " + n + " fehlt noch in der Fragen-Bank dieser Runde");
+    var override = model.solutions[solutionId(round.id, n)];
+    var solText = override && override.solution ? override.solution : q.solution || correctOption(q);
+    if (q.mc) {
+      var options = (q.options || []).map(function (o) { return (o || "").trim(); });
+      return { question: { kind: "mc", text: q.text, options: options, media: q.media || "" }, solution: { correct: Number(q.correct) || 0, text: solText } };
+    }
+    return { question: { kind: q.estimate ? "estimate" : "text", text: q.text, media: q.media || "" }, solution: { text: solText } };
+  }
+  function speedNext() {
+    var round = speedRound(); if (!round) return;
+    var st = speed.data && speed.data.state;
+    var sameRound = st && st.roundId === round.id && st.status !== "off" && st.status !== "done";
+    var n = sameRound ? (st.n || 0) + 1 : 1;
+    var of = Number(round.questions) || 0;
+    if (n > of) { byId("spMsg").textContent = "Alle " + of + " Fragen gespielt. „Runde beenden“ drücken."; return; }
+    var payload;
+    try { payload = speedPayload(round, n); } catch (err) { byId("spMsg").textContent = err.message; return; }
+    var go = function () { return speedCall(Object.assign({ action: "show", n: n, secs: Number(byId("spSecs").value) || Number(round.secs) || 20 }, speedScoring(), payload)); };
+    if (sameRound) go();
+    else speedCall(Object.assign({ action: "open", roundId: round.id, roundName: round.name, of: of }, speedScoring())).then(function (ok) { if (ok) go(); });
+  }
+  function speedScoring() {
+    return { points: Number(byId("spPoints").value) || 1, tempo: byId("spTempo").checked };
+  }
+  function fmtSecs(ms) { return ms == null ? "" : (ms / 1000).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " s"; }
+  function fmtPts(p) { return p == null ? "" : Number(p).toLocaleString("de-DE", { maximumFractionDigits: 1 }); }
+  // Points per team in the running speed round, highest first.
+  function speedTotals(d) {
+    var sums = {};
+    d.answers.forEach(function (a) { if (a.points != null) sums[a.team_id] = (sums[a.team_id] || 0) + a.points; });
+    return d.teams.map(function (t) { return { team: t, pts: Math.round((sums[t.id] || 0) * 10) / 10 }; })
+      .sort(function (a, b) { return b.pts - a.pts || a.team.name.localeCompare(b.team.name); });
+  }
+  function speedApply(j) {
+    speed.data = j;
+    speed.offset = j.serverTime - Date.now();
+    renderSpeed();
+  }
+  function renderSpeed() {
+    var d = speed.data, st = d ? d.state : { status: "off" };
+    var round = speedRound();
+    var running = d && st.roundId && round && st.roundId === round.id;
+    var label = {
+      off: "Noch nicht gestartet", lobby: "Lobby offen – Teams können sich verbinden", question: "Frage " + st.n + " / " + st.of + " läuft",
+      closed: "Frage " + st.n + " / " + st.of + " – Zeit um", reveal: "Frage " + st.n + " / " + st.of + " aufgelöst", done: "Runde beendet",
+    }[st.status] || st.status;
+    if (d && st.roundId && !running) label = "Läuft gerade in einer anderen Runde: " + (st.roundName || "");
+    var statusEl = byId("spStatus");
+    clearInterval(speed.ticker);
+    function tick() {
+      var left = st.status === "question" ? Math.max(0, Math.ceil((st.endsAt - Date.now() - speed.offset) / 1000)) : null;
+      statusEl.textContent = label + (left != null ? " · noch " + left + " s" : "");
+      if (left === 0 && st.status === "question") { clearInterval(speed.ticker); speedPoll(); }
+    }
+    tick();
+    if (st.status === "question") speed.ticker = setInterval(tick, 250);
+
+    var nextN = running && st.status !== "done" ? (st.n || 0) + 1 : 1;
+    byId("spNext").textContent = nextN === 1 ? "Erste Frage starten" : "Nächste Frage (" + nextN + ") starten";
+    byId("spNext").disabled = !!(running && st.status === "question");
+    byId("spClose").disabled = !(running && st.status === "question");
+    byId("spReveal").disabled = !(running && (st.status === "question" || st.status === "closed"));
+    byId("spEnd").disabled = !(running && st.status !== "done");
+
+    var qBox = byId("spQuestion");
+    qBox.hidden = !(running && st.question);
+    if (running && st.question) {
+      var q = st.question;
+      qBox.replaceChildren(
+        el("div", { class: "small muted" }, ["Frage " + st.n + (q.kind === "mc" ? " · Multiple Choice" : q.kind === "estimate" ? " · Schätzfrage" : "")]),
+        el("div", null, [q.text]),
+        q.kind === "mc" ? el("div", { class: "small" }, [(q.options || []).map(function (o, i) { return o ? "ABCDEF"[i] + ") " + o : ""; }).filter(Boolean).join(" · ")]) : null,
+        el("div", { class: "sol small" }, ["Lösung: " + (d.solution || "–")]));
+    }
+
+    if (running && st.scoring && document.activeElement !== byId("spPoints")) {
+      byId("spPoints").value = st.scoring.points; byId("spTempo").checked = !!st.scoring.tempo;
+    }
+    var totals = {};
+    if (running) speedTotals(d).forEach(function (x) { totals[x.team.id] = x.pts; });
+    var fastest = running && st.n ? d.answers.filter(function (a) { return a.question === st.n && a.points > 0 && a.ms != null; })
+      .sort(function (a, b) { return a.ms - b.ms; })[0] : null;
+    var fastTeam = fastest && d.teams.find(function (t) { return t.id === fastest.team_id; });
+    byId("spFastest").textContent = fastTeam ? "Schnellste richtige Antwort: " + fastTeam.name + " in " + fmtSecs(fastest.ms) : "";
+
+    var tb = byId("spTeams"); tb.innerHTML = "";
+    var answers = {};
+    (d ? d.answers : []).forEach(function (a) { if (running && a.question === st.n) answers[a.team_id] = a; });
+    var teams = d ? d.teams : state.teams.map(function (t) { return { id: t.id, name: t.name, code: "…" }; });
+    teams.forEach(function (t) {
+      var a = answers[t.id], joined = d && d.joins[t.id];
+      var mark = function (verdict, text, title) {
+        return el("button", { class: "btn", title: title, "aria-label": title + " – " + t.name, disabled: !running || !st.n, onclick: function () {
+          speedCall({ action: "score", teamId: t.id, n: st.n, verdict: verdict });
+        } }, [text]);
+      };
+      tb.appendChild(el("tr", null, [
+        el("td", null, [t.name]),
+        el("td", null, [el("code", null, [t.code])]),
+        el("td", null, [joined ? el("span", { class: "tag ok" }, ["verbunden"]) : el("span", { class: "tag open" }, ["fehlt"])]),
+        el("td", null, [a && a.answer ? a.answer : running && st.n ? "–" : ""]),
+        el("td", { class: "num" }, [a ? fmtSecs(a.ms) : ""]),
+        el("td", { class: "num" }, [a && a.points != null ? fmtPts(a.points) : a && a.answer ? "?" : ""]),
+        el("td", { class: "noprint" }, [mark("right", "✓", "Richtig"), " ", mark("wrong", "✗", "Falsch"), " ", mark("open", "?", "Offen")]),
+        el("td", { class: "num" }, [running ? fmtPts(totals[t.id]) : ""]),
+      ]));
+    });
+    if (!teams.length) tb.appendChild(el("tr", null, [el("td", { colspan: 8, class: "muted" }, ["Noch keine Teams angelegt (Tab „Teams & Scoreboard“)."])]));
+  }
+  byId("spRound").addEventListener("change", function () { var r = speedRound(); if (r) byId("spSecs").value = Number(r.secs) || 20; renderSpeed(); });
+  byId("spOpen").addEventListener("click", function () {
+    var r = speedRound(); if (!r) return;
+    speedCall(Object.assign({ action: "open", roundId: r.id, roundName: r.name, of: Number(r.questions) || 1 }, speedScoring()));
+  });
+  byId("spNext").addEventListener("click", speedNext);
+  byId("spClose").addEventListener("click", function () { speedCall({ action: "close" }); });
+  byId("spReveal").addEventListener("click", function () { speedCall({ action: "reveal" }); });
+  byId("spEnd").addEventListener("click", function () { if (confirm("Speed-Runde beenden?")) speedCall({ action: "end" }); });
+  byId("spReset").addEventListener("click", function () {
+    if (confirm("Spielstand und verbundene Geräte zurücksetzen? Abgegebene Antworten bleiben erhalten.")) speedCall({ action: "reset" });
+  });
+  byId("spScreen").addEventListener("click", function () { window.open("speed.html?screen=1", "braintap-speed-screen"); });
+  byId("spCards").addEventListener("click", function () {
+    var d = speed.data; if (!d || !d.teams.length) { byId("spMsg").textContent = "Keine Teams oder noch nicht geladen."; return; }
+    var url = location.origin + location.pathname.replace(/[^/]*$/, "") + "speed.html";
+    var w = window.open("", "_blank"); if (!w) return;
+    var cards = d.teams.map(function (t) {
+      return '<section class="c"><div class="qr">' + qrSvg(url + "?code=" + t.code) + '</div><div><p class="k">Speed-Runde · Team</p><h2>' + esc(t.name) + '</h2><p class="code">' + esc(t.code) + '</p>' +
+        '<p>Ein Handy pro Team: QR-Code scannen – oder <b>' + esc(url.replace(/^https?:\/\//, "")) + '</b> öffnen und den Code eingeben.</p></div></section>';
+    }).join("");
+    w.document.write('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Tischkarten Speed-Runde</title><style>' +
+      'body{font:14px/1.4 system-ui,sans-serif;margin:16px;color:#111;background:#fff}main{display:grid;grid-template-columns:1fr 1fr;gap:12px}' +
+      '.c{border:2px dashed #999;border-radius:10px;padding:16px;break-inside:avoid;display:flex;gap:14px;align-items:center}.qr svg{width:120px;height:120px;display:block}.k{margin:0;color:#b5452b;font-weight:700;text-transform:uppercase;font-size:.75rem;letter-spacing:.08em}' +
+      'h2{margin:4px 0 6px}.code{font-size:2.4rem;font-weight:800;letter-spacing:.3em;margin:6px 0}.u{font-size:.75rem;color:#555;word-break:break-all}' +
+      '@media(max-width:600px){main{grid-template-columns:1fr}}</style></head><body><main>' + cards + '</main><script>print()<\/script></body></html>');
+    w.document.close();
+  });
+
+  // QR code as inline SVG (vendor/qrcode, loaded with the page); empty when
+  // the library is unavailable, the printed code still works.
+  function qrSvg(text) {
+    if (typeof window.qrcode !== "function") return "";
+    var q = window.qrcode(0, "M"); q.addData(text); q.make();
+    return q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
   }
 
   /* ---------- Start ---------- */

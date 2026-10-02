@@ -99,6 +99,23 @@ async function migrate(c) {
         id INTEGER PRIMARY KEY CHECK (id = 1),
         v INTEGER NOT NULL)`,
       "INSERT OR IGNORE INTO sync_rev (id, v) VALUES (1, 0)",
+      // Speed round: the live game state (key "state", and the solution of the
+      // running question under "solution", never sent to teams) and which
+      // team devices have joined.
+      `CREATE TABLE IF NOT EXISTS speed (
+        key TEXT PRIMARY KEY,
+        data TEXT NOT NULL)`,
+      `CREATE TABLE IF NOT EXISTS speed_joins (
+        team_id TEXT PRIMARY KEY,
+        joined_at INTEGER NOT NULL)`,
+      // How long after the question opened each team's latest answer came in
+      // (server clock), for tempo points and "fastest team".
+      `CREATE TABLE IF NOT EXISTS speed_times (
+        round_id TEXT NOT NULL,
+        question INTEGER NOT NULL,
+        team_id TEXT NOT NULL,
+        ms INTEGER NOT NULL,
+        PRIMARY KEY (round_id, question, team_id))`,
     ],
     "write",
   )
@@ -181,8 +198,15 @@ export function oidcConfig() {
   return { issuer, clientId, clientSecret }
 }
 
+// Demo mode (DEMO_MODE=1): no login at all, everyone with the link is an
+// organiser and team phones pick their team from a list. Removing the
+// variable brings the password/Auth0 login back unchanged.
+export function demoMode() {
+  return process.env.DEMO_MODE === "1"
+}
+
 export function loginMethods() {
-  return { password: Boolean(process.env.ORGA_PASSWORD), oidc: Boolean(oidcConfig()) }
+  return { password: Boolean(process.env.ORGA_PASSWORD), oidc: Boolean(oidcConfig()), demo: demoMode() }
 }
 
 export function allowedEmails() {
@@ -208,24 +232,60 @@ const b64 = (s) => Buffer.from(s, "utf8").toString("base64url")
 const unb64 = (s) => Buffer.from(s, "base64url").toString("utf8")
 
 // "<expiry ms>.<base64url subject>.<hmac>": expiry and subject are signed, so
-// neither can be changed by hand. Tokens are stateless.
-export function sessionToken(subject = "orga", expiresAt = Date.now() + COOKIE_MAX_AGE * 1000) {
+// neither can be changed by hand. Tokens are stateless. `purpose` keeps token
+// kinds apart: a team token from the speed round is never an organiser session.
+function signToken(purpose, subject, expiresAt) {
   const body = `${expiresAt}.${b64(subject)}`
-  return `${body}.${sign(`braintap-session-v3|${body}`)}`
+  return `${body}.${sign(`${purpose}|${body}`)}`
 }
 
-function readToken(token) {
+function readSigned(purpose, token) {
   const parts = String(token).split(".")
   if (parts.length !== 3) return null
   const [exp, sub, sig] = parts
   const expiresAt = Number(exp)
   if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) return null
-  if (!safeEqual(sig, sign(`braintap-session-v3|${exp}.${sub}`))) return null
+  if (!safeEqual(sig, sign(`${purpose}|${exp}.${sub}`))) return null
   try {
     return { subject: unb64(sub) }
   } catch {
     return null
   }
+}
+
+const SESSION_PURPOSE = "braintap-session-v3"
+
+export function sessionToken(subject = "orga", expiresAt = Date.now() + COOKIE_MAX_AGE * 1000) {
+  return signToken(SESSION_PURPOSE, subject, expiresAt)
+}
+
+function readToken(token) {
+  return readSigned(SESSION_PURPOSE, token)
+}
+
+// Speed round: one device per team, signed in with the team's join code.
+export const TEAM_COOKIE = "bt_team"
+const TEAM_PURPOSE = "braintap-team-v1"
+export const TEAM_MAX_AGE = 60 * 60 * 12
+
+export function teamToken(teamId, expiresAt = Date.now() + TEAM_MAX_AGE * 1000) {
+  return signToken(TEAM_PURPOSE, teamId, expiresAt)
+}
+
+export function teamSession(request) {
+  const token = readCookie(request, TEAM_COOKIE)
+  const t = token ? readSigned(TEAM_PURPOSE, token) : null
+  return t ? { teamId: t.subject } : null
+}
+
+// Five characters without look-alikes (no 0/O, 1/I/L), derived from the team
+// id with the server secret: nothing to store, printable on the table cards.
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+export function teamCode(teamId) {
+  const digest = createHmac("sha256", secret()).update(`team-code|${teamId}`).digest()
+  let code = ""
+  for (let i = 0; i < 5; i++) code += CODE_ALPHABET[digest[i] % CODE_ALPHABET.length]
+  return code
 }
 
 function safeEqual(a, b) {
@@ -257,7 +317,8 @@ export { readCookie }
 
 export function session(request) {
   const token = readCookie(request, COOKIE)
-  return token ? readToken(token) : null
+  const s = token ? readToken(token) : null
+  return s ?? (demoMode() ? { subject: "demo" } : null)
 }
 
 export function requireAuth(request) {

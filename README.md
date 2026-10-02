@@ -9,6 +9,21 @@ Planung für das Pub-Quiz am 3. November 2026 (Köln/Bonn, ca. 40 Personen, 6–
 
 Alles wird auf dem Server gespeichert: Vercel Functions unter `api/` schreiben in eine SQLite-Datenbank bei Turso (libSQL). Jede Aufgabe, Runde, Punktzahl und Antwort ist eine eigene Zeile. Konflikte entscheidet die Server-Revision, nicht die Geräteuhr: Jede Änderung nennt die Revision, auf der sie beruht; hat jemand die Zeile inzwischen geändert, wird sie abgelehnt, der Client übernimmt die Serverfassung und zeigt einen Hinweis. Rundensummen werden aus den erfassten Antworten berechnet. Jede Änderung trägt eine Server-Revision, den Namen der Person und die Uhrzeit: Clients laden nach dem ersten Abruf nur noch Änderungen (`/api/state?since=N`), die Übersicht zeigt „Letzte Änderungen“, und Gelöschtes lässt sich aus dem Papierkorb wiederherstellen (`/api/history`). Zugriff nur mit Anmeldung: gemeinsames Orga-Passwort und/oder Login über Auth0 (OpenID Connect, beschränkt auf eine E-Mail-Liste). Ohne Netz puffert der Browser Änderungen und schickt sie nach; ein Service Worker hält die Seite offline ladbar. Export als JSON oder `.sqlite`.
 
+### Speed-Runde
+
+Die digitale Speed-Runde läuft direkt in BrainTap auf Vercel, ohne Docker und ohne WebSockets:
+
+- **Teams** öffnen auf einem Handy pro Team `speed.html` und geben ihren fünfstelligen Team-Code ein (Tischkarten druckt der Tab *Speed-Runde*). Ein Team-Gerät sieht nur die laufende Frage und die eigene Antwort; Planungsdaten bleiben gesperrt.
+- **Orga** steuert im Tab *Speed-Runde*: Runde öffnen, Fragen nacheinander starten, Zeit stoppen, auflösen, beenden. Die Fragen kommen aus der Fragen-Bank der gewählten Runde (gleiche Nummerierung wie Beamer und Antwortbögen).
+- **Server-Uhr**: `api/speed.js` setzt Start und Ende jeder Frage; verspätete Antworten werden abgelehnt. Multiple Choice und exakt passende Freitext-Antworten werden automatisch gewertet, alles andere per ✓/✗.
+- **Scoreboard**: Antworten landen in derselben `answers`-Tabelle wie die Papierrunden und zählen sofort.
+- **Punkte**: frei wählbare Punkte pro richtige Antwort; mit **Tempo-Punkten** bringt eine richtige Antwort je nach verbleibender Zeit zwischen der Hälfte und allen Punkten. Die Antwortzeit misst der Server; ✓/✗ der Orga rechnet nach derselben Regel.
+- **Beamer**: `speed.html?screen=1` (mit Orga-Anmeldung) zeigt vor der ersten Frage einen QR-Code zur Team-Seite, dann Frage (mit Bild oder Ton aus der Fragen-Bank), Countdown und Zahl der Antworten, nach dem Auflösen die Lösung, das schnellste richtige Team und den Stand der Runde.
+- **Handys** bleiben während der Runde wach, vibrieren bei jeder neuen Frage und zeigen nach dem Auflösen Punkte, Antwortzeit und den eigenen Platz.
+- **Tischkarten** mit QR-Code und Team-Code druckt der Tab *Speed-Runde* (`vendor/qrcode`, MIT).
+
+Die Geräte fragen den Stand jede Sekunde ab; Verbindungsabbrüche überstehen sie, weil der Spielstand in der Datenbank liegt und nicht im Speicher einer Funktion. Razzia selbst (Socket.IO mit Spielständen im Arbeitsspeicher) ließe sich auf Vercel nicht zuverlässig betreiben.
+
 ### Konfiguration (Vercel)
 
 Alles läuft auf Vercel. Die Datenbank ist eine SQLite-Datei, die als privater **Vercel Blob** gespeichert wird; jeder Schreibvorgang ist eine Transaktion mit ETag-Prüfung und automatischer Wiederholung bei gleichzeitigen Zugriffen (`api/_snapshot.js`). Alternativ wird eine Turso-Datenbank genutzt, sobald `TURSO_DATABASE_URL` gesetzt ist.
@@ -21,6 +36,8 @@ Alles läuft auf Vercel. Die Datenbank ist eine SQLite-Datei, die als privater *
 | `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET` | Optional: Login über Auth0 (Regular Web Application, Callback-URL `https://<domain>/api/oidc-callback`). Die Namen der Auth0-Integration aus dem Vercel Marketplace (`AUTH0_ISSUER_BASE_URL`, `AUTH0_SECRET`) werden ebenfalls erkannt |
 | `AUTH_ALLOWED_EMAILS` | Kommagetrennte E-Mail-Adressen, die sich per Auth0 anmelden dürfen (Pflicht für Auth0) |
 | `AUTH_SECRET` | Zufälliger Schlüssel (≥ 32 Zeichen) zum Signieren der Sitzungen; nötig, wenn kein `ORGA_PASSWORD` gesetzt ist |
+
+**Demo-Modus:** Mit `DEMO_MODE=1` entfällt jede Anmeldung – das Planungstool ist für alle mit dem Link offen, Team-Handys wählen ihr Team in der Speed-Runde aus einer Liste. Variable entfernen und neu deployen, dann gelten Passwort bzw. Auth0 wieder.
 
 `/api/health` zeigt ohne Login, ob Speicher und Anmeldung eingerichtet sind. Ist Auth0 eingerichtet, zeigt die Anmeldeseite „Mit Auth0 anmelden“; ohne `ORGA_PASSWORD` entfällt das Passwortfeld.
 
